@@ -1,5 +1,6 @@
 """Shared configuration, constants, and the compliance disclosure string."""
 
+import math
 import os
 
 import streamlit as st
@@ -40,34 +41,53 @@ def get_groq_key():
     return (get_secret("GROQ_API_KEY") or "").strip() or None
 
 
+def _is_invalid_number(value) -> bool:
+    """True if value is None, NaN, or not something that can be treated as a number."""
+    if value is None or not isinstance(value, (int, float)):
+        return True
+    try:
+        return math.isnan(value)
+    except TypeError:
+        return True
+
+
 def fmt_large_number(value, currency="$"):
     """Format a large number with B/M/T suffixes, e.g. 1234567890 -> '$1.23B'."""
-    if value is None:
+    if _is_invalid_number(value):
         return "—"
-    abs_value = abs(value)
-    sign = "-" if value < 0 else ""
-    if abs_value >= 1e12:
-        return f"{sign}{currency}{abs_value / 1e12:.2f}T"
-    if abs_value >= 1e9:
-        return f"{sign}{currency}{abs_value / 1e9:.2f}B"
-    if abs_value >= 1e6:
-        return f"{sign}{currency}{abs_value / 1e6:.2f}M"
-    if abs_value >= 1e3:
-        return f"{sign}{currency}{abs_value / 1e3:.2f}K"
-    return f"{sign}{currency}{abs_value:,.2f}"
+    try:
+        abs_value = abs(value)
+        sign = "-" if value < 0 else ""
+        if abs_value >= 1e12:
+            return f"{sign}{currency}{abs_value / 1e12:.2f}T"
+        if abs_value >= 1e9:
+            return f"{sign}{currency}{abs_value / 1e9:.2f}B"
+        if abs_value >= 1e6:
+            return f"{sign}{currency}{abs_value / 1e6:.2f}M"
+        if abs_value >= 1e3:
+            return f"{sign}{currency}{abs_value / 1e3:.2f}K"
+        return f"{sign}{currency}{abs_value:,.2f}"
+    except (TypeError, ValueError):
+        return "—"
 
 
 def fmt_pct(value, decimals=2):
     """Format a fraction (0.123) as a percentage string ('12.30%')."""
-    if value is None:
+    if _is_invalid_number(value):
         return "—"
-    return f"{value * 100:.{decimals}f}%"
+    try:
+        return f"{value * 100:.{decimals}f}%"
+    except (TypeError, ValueError):
+        return "—"
 
 
 def fmt_num(value, decimals=2):
-    if value is None:
+    if _is_invalid_number(value):
         return "—"
-    return f"{value:,.{decimals}f}"
+    try:
+        return f"{value:,.{decimals}f}"
+    except (TypeError, ValueError):
+        return "—"
 
 
 def render_footer():

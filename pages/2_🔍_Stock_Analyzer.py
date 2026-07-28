@@ -1,4 +1,5 @@
 import datetime as dt
+import math
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -23,6 +24,17 @@ from lib.market_data import (
 from lib.news import ticker_news, time_ago
 from lib.signals import at_a_glance, bs_delta, fundamental_score, max_pain_strike, technical_score
 from utils.theme import apply_dark_plotly
+
+
+def fmt(val, decimals=2, prefix="", suffix=""):
+    """Safely format a numeric metric value, tolerating None, NaN, and non-numeric types."""
+    try:
+        if val is None or (isinstance(val, float) and math.isnan(val)):
+            return "–"
+        return f"{prefix}{val:.{decimals}f}{suffix}"
+    except (TypeError, ValueError):
+        return "–"
+
 
 st.set_page_config(page_title=f"Stock Analyzer - {APP_NAME}", page_icon="🔍", layout="wide")
 inject_base_style()
@@ -71,15 +83,15 @@ with header_cols[1]:
     sector_industry = " · ".join(filter(None, [fund.get("sector"), fund.get("industry")]))
     st.caption(sector_industry or "—")
 with header_cols[2]:
-    st.metric("Price", f"${fund['price']:,.2f}" if fund.get("price") else "—")
+    st.metric("Price", fmt(fund.get("price"), prefix="$"))
 with header_cols[3]:
     st.metric("Market Cap", fmt_large_number(fund.get("market_cap")))
 with header_cols[4]:
     pe = fund.get("trailing_pe")
-    st.metric("Trailing P/E", f"{pe:.2f}" if pe else "—")
+    st.metric("Trailing P/E", fmt(pe))
 with header_cols[5]:
     beta = fund.get("beta")
-    st.metric("Beta", f"{beta:.2f}" if beta is not None else "—")
+    st.metric("Beta", fmt(beta))
 
 # ---------------------------------------------------------------------------
 # Extended hours banner (shown only outside regular market hours)
@@ -188,9 +200,9 @@ else:
     pain_strike = max_pain_strike(calls, puts)
 
     sum_cols = st.columns(3)
-    sum_cols[0].metric("Put / Call ratio", f"{pc_ratio:.2f}" if pc_ratio is not None else "—")
-    sum_cols[1].metric("Total volume", f"{total_volume:,.0f}")
-    sum_cols[2].metric("Max pain strike", f"${pain_strike:,.2f}" if pain_strike is not None else "—")
+    sum_cols[0].metric("Put / Call ratio", fmt(pc_ratio))
+    sum_cols[1].metric("Total volume", fmt(total_volume, decimals=0))
+    sum_cols[2].metric("Max pain strike", fmt(pain_strike, prefix="$"))
 
     display_cols = ["strike", "lastPrice", "bid", "ask", "impliedVolatility", "volume", "openInterest"]
     rename = {
