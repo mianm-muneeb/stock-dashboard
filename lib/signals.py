@@ -36,6 +36,18 @@ def _clip(value, lo=0, hi=100):
     return max(lo, min(hi, value))
 
 
+def _valid_num(value) -> bool:
+    """True if value is a usable number (not None, NaN, or a non-numeric type).
+
+    yfinance fundamentals occasionally come back as NaN or stray strings for a
+    given ticker; comparisons/arithmetic on those raise TypeError, so every
+    fundamentals field must be checked with this instead of `is not None`.
+    """
+    if value is None or isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    return not math.isnan(value)
+
+
 # ---------------------------------------------------------------------------
 # Chart indicator series (used by lib.charts.render_technical_chart)
 # ---------------------------------------------------------------------------
@@ -237,38 +249,38 @@ def fundamental_score(fund: dict) -> tuple[float | None, list[str]]:
     drivers = []
 
     profit_margin = fund.get("profit_margin")
-    if profit_margin is not None:
+    if _valid_num(profit_margin):
         comp = _clip(50 + profit_margin * 200)
         components.append((comp, 20))
         drivers.append(f"Net margin of {profit_margin * 100:.1f}%")
 
     roe = fund.get("return_on_equity")
-    if roe is not None:
+    if _valid_num(roe):
         comp = _clip(50 + roe * 150)
         components.append((comp, 20))
         drivers.append(f"Return on equity of {roe * 100:.1f}%")
 
     rev_growth = fund.get("revenue_growth")
-    if rev_growth is not None:
+    if _valid_num(rev_growth):
         comp = _clip(50 + rev_growth * 200)
         components.append((comp, 15))
         drivers.append(f"Revenue growth of {rev_growth * 100:.1f}% year over year")
 
     earn_growth = fund.get("earnings_growth")
-    if earn_growth is not None:
+    if _valid_num(earn_growth):
         comp = _clip(50 + earn_growth * 150)
         components.append((comp, 15))
         drivers.append(f"Earnings growth of {earn_growth * 100:.1f}% year over year")
 
     dte = fund.get("debt_to_equity")
-    if dte is not None:
+    if _valid_num(dte):
         ratio = dte / 100 if dte > 10 else dte  # yfinance reports as a percent-like number
         comp = _clip(100 - ratio * 25)
         components.append((comp, 15))
         drivers.append(f"Debt-to-equity ratio of {ratio:.2f}")
 
     current_ratio = fund.get("current_ratio")
-    if current_ratio is not None:
+    if _valid_num(current_ratio):
         # ~2.0 is considered comfortable; too high or too low both pull the score down slightly
         comp = _clip(100 - abs(current_ratio - 2.0) * 25)
         components.append((comp, 15))
@@ -331,7 +343,7 @@ def at_a_glance(history: pd.DataFrame, fund: dict) -> list[tuple[str, str]]:
 
     # Profitability: ROE tier
     roe = fund.get("return_on_equity")
-    if roe is not None:
+    if _valid_num(roe):
         if roe < 0:
             label = "Negative"
         elif roe < 0.10:
@@ -344,7 +356,7 @@ def at_a_glance(history: pd.DataFrame, fund: dict) -> list[tuple[str, str]]:
 
     # Leverage: D/E tier
     dte = fund.get("debt_to_equity")
-    if dte is not None:
+    if _valid_num(dte):
         ratio = dte / 100 if dte > 10 else dte
         if ratio < 0.5:
             label = "Low"
@@ -358,7 +370,7 @@ def at_a_glance(history: pd.DataFrame, fund: dict) -> list[tuple[str, str]]:
 
     # Volatility: beta vs market
     beta = fund.get("beta")
-    if beta is not None:
+    if _valid_num(beta):
         if beta < 0.8:
             label = "Lower than market"
         elif beta <= 1.2:
@@ -369,7 +381,7 @@ def at_a_glance(history: pd.DataFrame, fund: dict) -> list[tuple[str, str]]:
 
     # Valuation: P/E tier
     pe = fund.get("trailing_pe")
-    if pe is not None and pe > 0:
+    if _valid_num(pe) and pe > 0:
         if pe < 15:
             label = "Low multiple"
         elif pe < 25:
