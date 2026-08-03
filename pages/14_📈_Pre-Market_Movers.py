@@ -3,7 +3,7 @@ import datetime as dt
 import pandas as pd
 import streamlit as st
 
-from lib.config import APP_NAME, fmt_large_number, inject_base_style, render_footer
+from lib.config import APP_NAME, inject_base_style, render_footer
 from lib.premarket import ET, PREMARKET_UNIVERSE, is_premarket_window, scan_premarket, top_headlines_bulk
 
 st.set_page_config(page_title=f"Pre-Market Movers - {APP_NAME}", page_icon="📈", layout="wide")
@@ -94,34 +94,62 @@ if filtered.empty:
 price_label = "Pre-Market Price" if premarket_active else "Price (Regular)"
 change_label = "Pre-Mkt Change %" if premarket_active else "Change % (Regular)"
 
-headers = ["Ticker", "Company", "Sector", price_label, change_label, "Market Cap", "Avg Volume", "52W Range Pos.", "Why It's Moving", ""]
-widths = [0.6, 1.6, 1.1, 0.9, 1.0, 0.8, 0.9, 0.9, 2.2, 1.2]
-
 headlines = top_headlines_bulk(tuple(filtered["Ticker"]))
 
-header_cols = st.columns(widths)
-for col, label in zip(header_cols, headers):
-    col.markdown(f"**{label}**")
-st.divider()
+display = filtered[["Ticker", "Company", "Sector", "Price", "Change%", "Market Cap", "Avg Volume", "Range Position%"]].copy()
+display = display.rename(columns={
+    "Price": price_label,
+    "Change%": change_label,
+    "Range Position%": "52W Range Pos.",
+})
+display["Market Cap"] = display["Market Cap"] / 1e9
+display["Avg Volume"] = display["Avg Volume"] / 1e6
+display["Why It's Moving"] = display["Ticker"].map(lambda t: headlines.get(t) or "—")
+display = display.reset_index(drop=True)
 
-for _, row in filtered.iterrows():
-    cols = st.columns(widths)
-    change = row["Change%"]
-    color = "#2ecc71" if change >= 2 else ("#f1c40f" if change >= 0.5 else "#d1d4dc")
-    range_pos = row["Range Position%"]
 
-    cols[0].markdown(f"**{row['Ticker']}**")
-    cols[1].write(row["Company"])
-    cols[2].write(row["Sector"])
-    cols[3].write(f"${row['Price']:,.2f}")
-    cols[4].markdown(f"<span style='color:{color}; font-weight:600;'>{change:+.2f}%</span>", unsafe_allow_html=True)
-    cols[5].write(fmt_large_number(row["Market Cap"]))
-    cols[6].write(fmt_large_number(row["Avg Volume"], currency=""))
-    cols[7].write(f"{float(range_pos):.0f}%" if pd.notna(range_pos) else "—")
-    cols[8].write(headlines.get(row["Ticker"]) or "—")
+def _highlight_change(row):
+    val = row[change_label]
+    if val >= 2:
+        style = "color: #2ecc71; font-weight: 600;"
+    elif val >= 0.5:
+        style = "color: #f1c40f; font-weight: 600;"
+    else:
+        style = ""
+    styles = [""] * len(row)
+    styles[row.index.get_loc(change_label)] = style
+    return styles
 
-    if cols[9].button("Open in Analyzer", key=f"open_{row['Ticker']}"):
-        st.session_state["switch_ticker"] = row["Ticker"]
+
+styled = display.style.apply(_highlight_change, axis=1)
+
+event = st.dataframe(
+    styled,
+    column_config={
+        "Ticker": st.column_config.TextColumn("Ticker"),
+        "Company": st.column_config.TextColumn("Company"),
+        "Sector": st.column_config.TextColumn("Sector"),
+        price_label: st.column_config.NumberColumn(price_label, format="$%.2f"),
+        change_label: st.column_config.NumberColumn(change_label, format="%.2f%%"),
+        "Market Cap": st.column_config.NumberColumn("Market Cap ($B)", format="$%.1fB"),
+        "Avg Volume": st.column_config.NumberColumn("Avg Volume (M)", format="%.1fM"),
+        "52W Range Pos.": st.column_config.NumberColumn("52W Range %", format="%.0f%%"),
+        "Why It's Moving": st.column_config.TextColumn("Why It's Moving", width="large"),
+    },
+    hide_index=True,
+    use_container_width=True,
+    height=600,
+    on_select="rerun",
+    selection_mode="single-row",
+)
+
+selected_rows = event.selection.rows if event and event.selection else []
+if selected_rows:
+    sel_ticker = display.iloc[selected_rows[0]]["Ticker"]
+    if st.button(f"Open {sel_ticker} in Analyzer"):
+        st.session_state["switch_ticker"] = sel_ticker
         st.switch_page("pages/2_🔍_Stock_Analyzer.py")
+else:
+    st.caption("Select a row above to open it in the Stock Analyzer.")
 
 render_footer()
