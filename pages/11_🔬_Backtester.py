@@ -3,7 +3,14 @@ import datetime as dt
 import plotly.graph_objects as go
 import streamlit as st
 
-from lib.backtester import DEFAULT_PARAMS, STRATEGIES, fetch_price_history, run_backtest
+from lib.backtester import (
+    DEFAULT_PARAMS,
+    STRATEGIES,
+    WATCHLIST,
+    fetch_price_history,
+    run_backtest,
+    run_bb_mid_cross_watchlist,
+)
 from lib.config import APP_NAME, inject_base_style, render_footer
 from utils.theme import apply_dark_plotly
 
@@ -80,6 +87,21 @@ with st.expander("Strategy parameters", expanded=(strategy == "Custom")):
         params["fast_ema"] = c5.number_input("Fast EMA", min_value=2, max_value=200, value=params["fast_ema"], disabled=not params["use_ema_filter"])
         params["slow_ema"] = c6.number_input("Slow EMA", min_value=5, max_value=400, value=params["slow_ema"], disabled=not params["use_ema_filter"])
 
+    elif strategy == "BB Mid-Cross Reversion":
+        c1, c2 = st.columns(2)
+        params["take_profit_pct"] = c1.slider(
+            "Take-profit target (%)", min_value=1.0, max_value=2.0,
+            value=float(params["take_profit_pct"]), step=0.1,
+        )
+        params["stop_loss_pct"] = c2.slider(
+            "Stop loss (%)", min_value=0.5, max_value=3.0,
+            value=float(params["stop_loss_pct"]), step=0.1,
+        )
+        st.caption(
+            f"Time-based exit is fixed at {params['max_bars_held']} bars held. This strategy runs across "
+            f"the curated {len(WATCHLIST)}-stock watchlist below, not the Ticker field above."
+        )
+
 run = st.button("Run backtest", type="primary")
 
 # ---------------------------------------------------------------------------
@@ -118,7 +140,24 @@ def metric_row(metrics, container):
     cols[5].metric("Total Trades", f"{metrics['Total Trades']:.0f}")
 
 
-if run:
+def bb_mid_cross_metric_row(metrics, container):
+    cols = container.columns(5)
+    cols[0].metric("Win Rate", f"{metrics['Win Rate %']:.0f}%")
+    cols[1].metric("Avg Win", f"{metrics['Avg Win %']:+.2f}%")
+    cols[2].metric("Avg Loss", f"{metrics['Avg Loss %']:+.2f}%")
+    cols[3].metric("Total Trades", f"{metrics['Total Trades']:.0f}")
+    cols[4].metric("Max Drawdown", f"{metrics['Max Drawdown %']:.1f}%")
+
+
+if run and strategy == "BB Mid-Cross Reversion":
+    with st.spinner(f"Running BB Mid-Cross Reversion across {len(WATCHLIST)} watchlist stocks..."):
+        wl_result = run_bb_mid_cross_watchlist(
+            WATCHLIST, start_date.isoformat(), end_date.isoformat(), params, initial_capital,
+        )
+    st.session_state["bt_watchlist_result"] = {"strategy": strategy, "result": wl_result}
+    st.session_state.pop("bt_last_result", None)
+
+elif run:
     if not ticker:
         st.warning("Enter a ticker.")
         render_footer()
@@ -136,6 +175,47 @@ if run:
     st.session_state["bt_last_result"] = {
         "ticker": ticker, "strategy": strategy, "result": result, "history": history,
     }
+    st.session_state.pop("bt_watchlist_result", None)
+
+wl_last = st.session_state.get("bt_watchlist_result")
+
+if wl_last:
+    wl_result = wl_last["result"]
+    wl_metrics = wl_result["metrics"]
+
+    st.divider()
+    st.subheader(f"{wl_last['strategy']} - {wl_result.get('tickers_scanned', 0)}-stock watchlist")
+
+    if not wl_metrics:
+        st.info("No completed trades across the watchlist in this date range.")
+    else:
+        st.caption(
+            f"{wl_result['tickers_traded']} of {wl_result['tickers_scanned']} watchlist stocks produced "
+            f"at least one trade. Capital is split evenly across all watchlist stocks."
+        )
+        bb_mid_cross_metric_row(wl_metrics, st)
+
+        wl_curve = wl_result["equity_curve"]
+        fig_wl = go.Figure()
+        fig_wl.add_trace(go.Scatter(x=wl_curve.index, y=wl_curve["Strategy"], name="Strategy", line=dict(color="#3498db", width=2)))
+        fig_wl.add_trace(go.Scatter(x=wl_curve.index, y=wl_curve["Buy & Hold"], name="Buy & Hold", line=dict(color="#7f8c8d", width=2, dash="dot")))
+        fig_wl.update_layout(
+            height=420, margin=dict(l=10, r=10, t=30, b=10),
+            yaxis_title="Portfolio value ($)",
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        )
+        apply_dark_plotly(fig_wl)
+        st.plotly_chart(fig_wl, use_container_width=True, config={"displayModeBar": False})
+
+        st.subheader("Trade log")
+        wl_trades = wl_result["trades"]
+        if not wl_trades:
+            st.info("No completed trades in this date range.")
+        else:
+            import pandas as pd
+            wl_trades_df = pd.DataFrame(wl_trades)
+            wl_trades_df = wl_trades_df[["Ticker"] + [c for c in wl_trades_df.columns if c != "Ticker"]]
+            st.dataframe(style_trades(wl_trades_df), use_container_width=True, hide_index=True, height=320)
 
 last = st.session_state.get("bt_last_result")
 
@@ -180,7 +260,7 @@ if last:
         rows = []
         compare_curves = {}
         for strat_name in STRATEGIES:
-            if strat_name == "Custom":
+            if strat_name in ("Custom", "BB Mid-Cross Reversion"):
                 continue
             res = run_backtest(history, strat_name, DEFAULT_PARAMS[strat_name], initial_capital)
             m = res["metrics"]
@@ -217,7 +297,7 @@ if last:
         )
         apply_dark_plotly(fig2)
         st.plotly_chart(fig2, use_container_width=True, config={"displayModeBar": False})
-else:
+elif not wl_last:
     st.info("Configure a strategy and click **Run backtest** to see results.")
 
 render_footer()

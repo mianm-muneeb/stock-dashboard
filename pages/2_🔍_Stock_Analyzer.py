@@ -147,7 +147,7 @@ view = st.segmented_control(
 )
 view = view or "Performance"
 
-control_cols = st.columns([3, 2])
+control_cols = st.columns([3, 2, 2])
 with control_cols[0]:
     overlays = st.multiselect(
         "Overlays", options=OVERLAY_OPTIONS, default=["EMA50", "EMA200"], key="analyzer_overlays",
@@ -156,6 +156,8 @@ with control_cols[1]:
     panels = st.multiselect(
         "Indicator panels", options=PANEL_OPTIONS, default=["Volume", "RSI", "MACD"], key="analyzer_panels",
     )
+with control_cols[2]:
+    show_bb_signals = st.checkbox("Show BB Mid-Cross signals", value=False, key="analyzer_bb_signals")
 
 history = get_history_tf(ticker, timeframe)
 baseline = get_prev_close(ticker) if timeframe == "1d" else None
@@ -164,6 +166,7 @@ chart_height = max(650, 500 + 150 * n_sub_panels)
 fig = render_technical_chart(
     history, view=view, baseline_price=baseline, title=ticker,
     overlays=overlays, panels=panels, height=chart_height,
+    show_bb_signals=show_bb_signals,
 )
 st.plotly_chart(
     fig, use_container_width=True,
