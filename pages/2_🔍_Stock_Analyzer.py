@@ -43,7 +43,7 @@ st.title("🔍 Stock Analyzer")
 
 col_input, col_period = st.columns([2, 3])
 with col_input:
-    default_ticker = st.query_params.get("ticker", "AAPL")
+    default_ticker = st.session_state.pop("switch_ticker", None) or st.query_params.get("ticker", "AAPL")
     ticker = st.text_input("Ticker", value=default_ticker).strip().upper()
 with col_period:
     timeframe = st.segmented_control(
