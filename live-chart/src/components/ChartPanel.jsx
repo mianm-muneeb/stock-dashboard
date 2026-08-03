@@ -8,9 +8,8 @@ import {
   LineSeries,
   HistogramSeries,
   AreaSeries,
-  createSeriesMarkers,
 } from 'lightweight-charts'
-import { ema, bollingerBands, rsi, macd, vwap, ichimoku, bbMidCrossSignals } from '../lib/indicators'
+import { ema, bollingerBands, rsi, macd, vwap, ichimoku } from '../lib/indicators'
 import { DrawingPrimitive } from '../lib/drawingPrimitive'
 
 const BG = '#131722'
@@ -43,7 +42,6 @@ export default function ChartPanel({ bars, indicators, livePrice, liveBar, activ
   const volumeSeriesRef = useRef(null)
   const priceLineRef = useRef(null)
   const extraSeriesRef = useRef([])
-  const markersPluginRef = useRef(null)
 
   const primitiveRef = useRef(null)
   const drawingsRef = useRef([])
@@ -98,7 +96,6 @@ export default function ChartPanel({ bars, indicators, livePrice, liveBar, activ
 
     chartRef.current = chart
     candleSeriesRef.current = candleSeries
-    markersPluginRef.current = createSeriesMarkers(candleSeries, [])
 
     // Drawing overlay primitive (trend lines, rectangles, text labels).
     const primitive = new DrawingPrimitive(() => ({
@@ -276,7 +273,6 @@ export default function ChartPanel({ bars, indicators, livePrice, liveBar, activ
       priceLineRef.current = null
       extraSeriesRef.current = []
       primitiveRef.current = null
-      markersPluginRef.current = null
     }
   }, [])
 
@@ -445,22 +441,6 @@ export default function ChartPanel({ bars, indicators, livePrice, liveBar, activ
       })
       chikouSeries.setData(chikou)
       extraSeriesRef.current.push(chikouSeries)
-    }
-
-    // -- BB Mid-Cross Reversion signal markers -----------------------------
-    if (indicators.has('BBSIGNALS') && bars.length >= 20) {
-      const { entries, exits } = bbMidCrossSignals(bars)
-      const markers = [
-        ...entries.map((e) => ({
-          time: e.time, position: 'belowBar', color: '#26a69a', shape: 'arrowUp', text: 'Buy',
-        })),
-        ...exits.map((e) => ({
-          time: e.time, position: 'aboveBar', color: '#ef5350', shape: 'arrowDown', text: 'Sell',
-        })),
-      ].sort((a, b) => a.time - b.time)
-      markersPluginRef.current?.setMarkers(markers)
-    } else {
-      markersPluginRef.current?.setMarkers([])
     }
 
     // -- Sub-panes -----------------------------------------------------------

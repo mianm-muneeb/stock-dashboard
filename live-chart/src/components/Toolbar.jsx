@@ -11,7 +11,6 @@ export const INDICATOR_OPTIONS = [
   { key: 'Volume', label: 'Volume' },
   { key: 'RSI', label: 'RSI' },
   { key: 'MACD', label: 'MACD' },
-  { key: 'BBSIGNALS', label: 'BB Mid-Cross signals' },
 ]
 
 export default function Toolbar({ symbol, onSymbolChange, timeframe, onTimeframeChange, indicators, onToggleIndicator }) {

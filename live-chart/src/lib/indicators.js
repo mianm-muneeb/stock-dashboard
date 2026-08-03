@@ -166,64 +166,6 @@ export function ichimoku(bars, conversionPeriod = 9, basePeriod = 26, spanBPerio
   return { tenkan, kijun, spanA, spanB, chikou }
 }
 
-/**
- * BB Mid-Cross Reversion signals: entry when close crosses above the 20-bar
- * SMA (Bollinger mid band, computed via `sma()` above) from below; exit at a
- * target gain, a stop loss, or after `maxBarsHeld` bars, whichever comes
- * first. Mirrors lib/backtester.run_bb_mid_cross_single in the Python app so
- * the two stay in sync.
- */
-export function bbMidCrossSignals(bars, { takeProfitPct = 1.5, stopLossPct = 1.0, maxBarsHeld = 10 } = {}) {
-  const middle = sma(bars, 20)
-  const smaMap = new Map(middle.map((p) => [p.time, p.value]))
-
-  const entries = []
-  const exits = []
-
-  let inPosition = false
-  let entryPrice = null
-  let barsHeld = 0
-  let prevClose = null
-  let prevSma = null
-
-  for (const bar of bars) {
-    const smaVal = smaMap.get(bar.time)
-    const close = bar.close
-
-    if (inPosition) {
-      barsHeld += 1
-      const change = close / entryPrice - 1
-      let exitReason = null
-      if (change >= takeProfitPct / 100) exitReason = 'target'
-      else if (change <= -stopLossPct / 100) exitReason = 'stop'
-      else if (barsHeld >= maxBarsHeld) exitReason = 'time'
-
-      if (exitReason) {
-        exits.push({ time: bar.time, price: close, reason: exitReason })
-        inPosition = false
-        entryPrice = null
-        barsHeld = 0
-      }
-    }
-
-    if (!inPosition && smaVal !== undefined && prevSma !== null && prevClose !== null) {
-      if (prevClose < prevSma && close > smaVal) {
-        entries.push({ time: bar.time, price: close })
-        inPosition = true
-        entryPrice = close
-        barsHeld = 0
-      }
-    }
-
-    if (smaVal !== undefined) {
-      prevClose = close
-      prevSma = smaVal
-    }
-  }
-
-  return { entries, exits }
-}
-
 export function macd(bars, fast = 12, slow = 26, signalPeriod = 9) {
   const emaFast = ema(bars, fast)
   const emaSlow = ema(bars, slow)

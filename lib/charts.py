@@ -347,7 +347,6 @@ def render_technical_chart(
     overlays: list[str] | None = None,
     panels: list[str] | None = None,
     height: int = 650,
-    show_bb_signals: bool = False,
 ):
     """Render a multi-panel, TradingView-styled technical chart: price (with
     optional overlays and a volume overlay) on top, and a stacked sub-panel
@@ -541,34 +540,6 @@ def render_technical_chart(
             ),
             row=1, col=1,
         )
-
-    # -- BB Mid-Cross Reversion signal markers -----------------------------
-    if show_bb_signals and len(close) >= 20:
-        from lib.backtester import bb_mid_cross_signals
-
-        signals = bb_mid_cross_signals(df)
-        if signals["entries"]:
-            entry_dates, entry_prices = zip(*signals["entries"])
-            fig.add_trace(
-                go.Scatter(
-                    x=list(entry_dates), y=list(to_scale(pd.Series(entry_prices))), mode="markers",
-                    marker=dict(symbol="triangle-up", size=12, color=GREEN, line=dict(width=1, color="#0d1117")),
-                    name="BB Mid-Cross Entry", showlegend=True,
-                    hovertemplate="Entry: $%{customdata:.2f}<extra></extra>", customdata=list(entry_prices),
-                ),
-                row=1, col=1,
-            )
-        if signals["exits"]:
-            exit_dates, exit_prices = zip(*signals["exits"])
-            fig.add_trace(
-                go.Scatter(
-                    x=list(exit_dates), y=list(to_scale(pd.Series(exit_prices))), mode="markers",
-                    marker=dict(symbol="triangle-down", size=12, color=RED, line=dict(width=1, color="#0d1117")),
-                    name="BB Mid-Cross Exit", showlegend=True,
-                    hovertemplate="Exit: $%{customdata:.2f}<extra></extra>", customdata=list(exit_prices),
-                ),
-                row=1, col=1,
-            )
 
     # -- Volume overlay (semi-transparent, bottom of the price panel) -----
     if show_volume:
