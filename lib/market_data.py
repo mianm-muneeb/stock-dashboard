@@ -7,6 +7,7 @@ avoid hammering Yahoo Finance.
 from __future__ import annotations
 
 import datetime as dt
+import logging
 import random
 import tempfile
 import time
@@ -15,6 +16,8 @@ import requests
 import pandas as pd
 import streamlit as st
 import yfinance as yf
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Network helpers
@@ -61,6 +64,26 @@ def _fetch_history(tk: yf.Ticker, retries: int = 3, **kwargs) -> pd.DataFrame:
         if attempt < retries - 1:
             time.sleep(2 ** attempt + random.uniform(0, 1))
     return pd.DataFrame()
+
+
+def _retry_call(fn, retries: int = 3, label: str = ""):
+    """Call fn() with exponential-backoff retries on exceptions only (a
+    legitimate empty/falsy result is not retried - that's real data, not a
+    failure). Returns (result, error_message); error_message is None unless
+    every attempt raised, in which case it holds the last exception's text
+    so callers can surface *why* a fetch failed instead of silently showing
+    "unavailable" for both real outages and tickers with no data.
+    """
+    last_err = None
+    for attempt in range(retries):
+        try:
+            return fn(), None
+        except Exception as e:
+            last_err = f"{type(e).__name__}: {e}"
+            logger.warning("market_data: %s failed (attempt %d/%d): %s", label, attempt + 1, retries, last_err)
+        if attempt < retries - 1:
+            time.sleep(2 ** attempt + random.uniform(0, 1))
+    return None, last_err
 
 
 # ---------------------------------------------------------------------------
@@ -578,32 +601,42 @@ def get_research_data(ticker: str) -> dict:
     for 200MA + RSI + up to ~8 quarters of earnings-day moves), the earnings
     calendar, and confirmed earnings dates.
 
+    calendar/earnings_dates are fetched with retries so a transient Yahoo
+    Finance hiccup doesn't get cached as "no data" for the full 5-minute TTL.
+    If every retry still fails, the *_error field carries the last exception
+    text so the page can tell callers the difference between "this ticker
+    genuinely has no earnings data" (e.g. an ETF) and "the fetch failed".
+
     Returns a dict with keys:
-        history        - 3y daily OHLCV DataFrame (empty if fetch failed)
-        calendar       - tk.calendar dict, or None if unavailable
-        earnings_dates - DataFrame from tk.get_earnings_dates(), or None
+        history         - 3y daily OHLCV DataFrame (empty if fetch failed)
+        calendar        - tk.calendar dict, or None if unavailable/empty
+        calendar_error  - last exception text if the calendar fetch raised, else None
+        earnings_dates  - DataFrame from tk.get_earnings_dates(), or None if unavailable/empty
+        earnings_error  - last exception text if the earnings fetch raised, else None
     """
     tk = _fetch_ticker(ticker)
     if tk is None:
-        return {"history": pd.DataFrame(), "calendar": None, "earnings_dates": None}
+        return {
+            "history": pd.DataFrame(),
+            "calendar": None, "calendar_error": "Could not authenticate with Yahoo Finance",
+            "earnings_dates": None, "earnings_error": "Could not authenticate with Yahoo Finance",
+        }
 
     history = _fetch_history(tk, period="3y", interval="1d")
 
-    calendar = None
-    try:
-        calendar = tk.calendar
-    except Exception:
+    calendar, calendar_error = _retry_call(lambda: tk.calendar, label=f"{ticker} calendar")
+    if not calendar:
         calendar = None
 
-    earnings_dates = None
-    try:
-        ed = tk.get_earnings_dates(limit=12)
-        if ed is not None and not ed.empty:
-            earnings_dates = ed
-    except Exception:
+    earnings_dates, earnings_error = _retry_call(lambda: tk.get_earnings_dates(limit=12), label=f"{ticker} get_earnings_dates")
+    if earnings_dates is None or earnings_dates.empty:
         earnings_dates = None
 
-    return {"history": history, "calendar": calendar, "earnings_dates": earnings_dates}
+    return {
+        "history": history,
+        "calendar": calendar, "calendar_error": calendar_error,
+        "earnings_dates": earnings_dates, "earnings_error": earnings_error,
+    }
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
