@@ -1,4 +1,4 @@
-"""Shared configuration, constants, and the compliance disclosure string."""
+"""Shared configuration and constants."""
 
 import math
 import os
@@ -9,13 +9,6 @@ from dotenv import load_dotenv
 load_dotenv()
 
 APP_NAME = "Stock Market Analyst"
-
-DISCLOSURE = (
-    "This dashboard is for educational and informational purposes only. "
-    "It is not financial advice, not a recommendation to buy or sell any security, "
-    "and is not personalized to your situation. Consult a licensed advisor before "
-    "making investment decisions."
-)
 
 
 def get_secret(key):
@@ -91,11 +84,10 @@ def fmt_num(value, decimals=2):
 
 
 def render_footer():
-    """Render the standard disclosure footer. Import and call at the bottom of every page."""
+    """Render the standard page-end divider. Import and call at the bottom of every page."""
     import streamlit as st
 
     st.divider()
-    st.caption(DISCLOSURE)
 
 
 _STRUCTURAL_CSS = """
