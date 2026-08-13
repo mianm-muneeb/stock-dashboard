@@ -66,6 +66,16 @@ def _fetch_history(tk: yf.Ticker, retries: int = 3, **kwargs) -> pd.DataFrame:
     return pd.DataFrame()
 
 
+def _is_not_found_error(e: Exception) -> bool:
+    """True for a 404 from Yahoo's quoteSummary API - its deterministic way of
+    saying "this symbol has no such data" (e.g. an ETF has no earnings
+    calendar). That's a real, permanent answer, not a transient failure, so
+    it shouldn't be retried or surfaced as a scary fetch error.
+    """
+    response = getattr(e, "response", None)
+    return response is not None and getattr(response, "status_code", None) == 404
+
+
 def _retry_call(fn, retries: int = 3, label: str = ""):
     """Call fn() with exponential-backoff retries on exceptions only (a
     legitimate empty/falsy result is not retried - that's real data, not a
@@ -79,6 +89,9 @@ def _retry_call(fn, retries: int = 3, label: str = ""):
         try:
             return fn(), None
         except Exception as e:
+            if _is_not_found_error(e):
+                logger.info("market_data: %s returned 404 (no data for this symbol)", label)
+                return None, None
             last_err = f"{type(e).__name__}: {e}"
             logger.warning("market_data: %s failed (attempt %d/%d): %s", label, attempt + 1, retries, last_err)
         if attempt < retries - 1:
