@@ -10,6 +10,7 @@ import datetime as dt
 import logging
 import random
 import tempfile
+import threading
 import time
 
 import requests
@@ -27,6 +28,28 @@ _YF_SESSION = requests.Session()
 _YF_SESSION.headers["User-Agent"] = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
 )
+
+# Yahoo's earnings-calendar scrape endpoint (Ticker.calendar /
+# get_earnings_dates()) trips a burst rate limit far more easily than its
+# other APIs: back-to-back calls with no gap between them - e.g. several
+# ThreadPoolExecutor workers hitting it during a full watchlist scan -
+# reliably corrupt responses into a deterministic-looking
+# `KeyError: ['Earnings Date']`, even though the exact same call succeeds
+# instantly in isolation. A lock plus a minimum spacing between calls (not
+# just serializing them) keeps a full scan reliable without giving up
+# parallelism for the rest of the per-ticker work (history, validation).
+_EARNINGS_CALL_LOCK = threading.Lock()
+_last_earnings_call_at = 0.0
+_MIN_EARNINGS_CALL_INTERVAL = 0.6  # seconds
+
+
+def _wait_for_earnings_call_slot() -> None:
+    """Call only while holding _EARNINGS_CALL_LOCK."""
+    global _last_earnings_call_at
+    wait = _last_earnings_call_at + _MIN_EARNINGS_CALL_INTERVAL - time.time()
+    if wait > 0:
+        time.sleep(wait)
+    _last_earnings_call_at = time.time()
 
 # Cache timezone data in the system temp dir so it's always writable
 # (avoids permission errors on Streamlit Cloud / read-only filesystems).
@@ -637,13 +660,16 @@ def get_research_data(ticker: str) -> dict:
 
     history = _fetch_history(tk, period="3y", interval="1d")
 
-    calendar, calendar_error = _retry_call(lambda: tk.calendar, label=f"{ticker} calendar")
-    if not calendar:
-        calendar = None
+    with _EARNINGS_CALL_LOCK:
+        _wait_for_earnings_call_slot()
+        calendar, calendar_error = _retry_call(lambda: tk.calendar, label=f"{ticker} calendar")
+        if not calendar:
+            calendar = None
 
-    earnings_dates, earnings_error = _retry_call(lambda: tk.get_earnings_dates(limit=12), label=f"{ticker} get_earnings_dates")
-    if earnings_dates is None or earnings_dates.empty:
-        earnings_dates = None
+        _wait_for_earnings_call_slot()
+        earnings_dates, earnings_error = _retry_call(lambda: tk.get_earnings_dates(limit=12), label=f"{ticker} get_earnings_dates")
+        if earnings_dates is None or earnings_dates.empty:
+            earnings_dates = None
 
     return {
         "history": history,

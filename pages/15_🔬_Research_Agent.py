@@ -1,6 +1,4 @@
-import csv
 import datetime as dt
-from pathlib import Path
 
 import pandas as pd
 import streamlit as st
@@ -8,6 +6,7 @@ import streamlit as st
 from lib.config import APP_NAME, inject_base_style, render_footer
 from lib.market_data import get_research_data
 from lib.news import ticker_news, time_ago
+from lib.research_screener import EARNINGS_WINDOW_DAYS, PREMARKET_UNIVERSE, scan_watchlist
 from lib.signals import compute_rsi
 
 st.set_page_config(page_title=f"Research Agent - {APP_NAME}", page_icon="🔬", layout="wide")
@@ -15,27 +14,13 @@ inject_base_style()
 
 st.title("🔬 Research Agent")
 st.caption(
-    "Evidence-only pre-trade checklist: earnings timing, volume, moving averages, "
-    "RSI, historical earnings-day moves, and headlines. No scores, ratings, or recommendations."
+    f"Scans a {len(PREMARKET_UNIVERSE)}-ticker large-cap watchlist for setups with earnings "
+    f"within {EARNINGS_WINDOW_DAYS} days, ranked by a transparent point score: earnings-day move "
+    "consistency, volume, moving-average alignment, RSI, and earnings urgency. No scores are buy/sell "
+    "calls - this screens for setups worth investigating, not trade recommendations."
 )
 
-LOG_PATH = Path(__file__).resolve().parent.parent / "logs" / "research_agent_log.csv"
-LOG_FIELDS = [
-    "timestamp", "ticker", "earnings_within_14d", "earnings_date",
-    "volume_ratio", "price_vs_50ma_pct", "price_vs_200ma_pct", "rsi",
-]
-
 GREEN, RED, AMBER, NEUTRAL = "#2ecc71", "#e74c3c", "#f39c12", "#888"
-
-
-def log_query(row: dict) -> None:
-    LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
-    is_new = not LOG_PATH.exists()
-    with open(LOG_PATH, "a", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=LOG_FIELDS)
-        if is_new:
-            writer.writeheader()
-        writer.writerow(row)
 
 
 def unavailable(reason: str | None) -> None:
@@ -50,7 +35,10 @@ def unavailable(reason: str | None) -> None:
 
 
 def render_research(ticker: str, data: dict) -> None:
-    """Render all six sections for an already-fetched research payload."""
+    """Render the six-section detail view for a single ticker (unchanged from
+    the original single-ticker page, minus per-lookup logging - the screener
+    now logs once per scan run instead, in lib/research_screener.py).
+    """
     history = data["history"]
     close = history["Close"].dropna()
     volume = history["Volume"].dropna() if "Volume" in history.columns else pd.Series(dtype=float)
@@ -87,10 +75,8 @@ def render_research(ticker: str, data: dict) -> None:
     with st.container(border=True):
         if not has_calendar and not has_earnings_df:
             unavailable(calendar_error or earnings_error)
-            earnings_within_14d = False
         elif next_earnings_date is None:
             st.markdown(f"<span style='color:{NEUTRAL};font-weight:600'>No earnings within 14 days.</span>", unsafe_allow_html=True)
-            earnings_within_14d = False
         else:
             days_until = (next_earnings_date - today).days
             earnings_within_14d = days_until <= 14
@@ -119,7 +105,6 @@ def render_research(ticker: str, data: dict) -> None:
     with st.container(border=True):
         if volume.empty:
             unavailable(None)
-            volume_ratio = None
         else:
             latest_volume = float(volume.iloc[-1])
             avg20 = float(volume.tail(20).mean())
@@ -146,7 +131,6 @@ def render_research(ticker: str, data: dict) -> None:
         with cols[0]:
             if ma50 is None:
                 unavailable(None)
-                price_vs_50ma_pct = None
             else:
                 price_vs_50ma_pct = (current_price - ma50) / ma50 * 100
                 direction = "Above" if price_vs_50ma_pct >= 0 else "Below"
@@ -155,7 +139,6 @@ def render_research(ticker: str, data: dict) -> None:
         with cols[1]:
             if ma200 is None:
                 unavailable(None)
-                price_vs_200ma_pct = None
             else:
                 price_vs_200ma_pct = (current_price - ma200) / ma200 * 100
                 direction = "Above" if price_vs_200ma_pct >= 0 else "Below"
@@ -250,46 +233,93 @@ def render_research(ticker: str, data: dict) -> None:
                 if item.get("link"):
                     st.markdown(f"[Read more]({item['link']})")
 
-    # -----------------------------------------------------------------------
-    # Log the query
-    # -----------------------------------------------------------------------
-    try:
-        log_query({
-            "timestamp": dt.datetime.now(dt.timezone.utc).isoformat(),
-            "ticker": ticker,
-            "earnings_within_14d": earnings_within_14d,
-            "earnings_date": next_earnings_date.strftime("%Y-%m-%d") if next_earnings_date else "",
-            "volume_ratio": round(volume_ratio, 4) if volume_ratio is not None else "",
-            "price_vs_50ma_pct": round(price_vs_50ma_pct, 4) if price_vs_50ma_pct is not None else "",
-            "price_vs_200ma_pct": round(price_vs_200ma_pct, 4) if price_vs_200ma_pct is not None else "",
-            "rsi": round(rsi, 4) if rsi is not None else "",
-        })
-    except Exception:
-        pass
-
 
 # ---------------------------------------------------------------------------
-# Entry point: ticker input + Analyze button gate everything below.
+# Scan controls
 # ---------------------------------------------------------------------------
-ticker = st.text_input("Ticker", value="AAPL", key="ra_ticker").strip().upper()
-run = st.button("Analyze", type="primary")
+refresh_col, _ = st.columns([1, 4])
+with refresh_col:
+    refresh = st.button("🔄 Refresh Scan", type="primary")
 
-if run:
-    if not ticker:
-        st.warning("Enter a ticker symbol.")
+if refresh:
+    scan_watchlist.clear()
+
+with st.spinner(f"Scanning {len(PREMARKET_UNIVERSE)} tickers…"):
+    ranked = scan_watchlist(tuple(PREMARKET_UNIVERSE))
+
+st.caption(
+    f"Showing {len(ranked)} of {len(PREMARKET_UNIVERSE)} tickers with earnings within "
+    f"{EARNINGS_WINDOW_DAYS} days · Cached for 15 minutes"
+)
+
+if ranked.empty:
+    st.info(f"No tickers in the watchlist currently have earnings within {EARNINGS_WINDOW_DAYS} days.")
+    render_footer()
+    st.stop()
+
+# ---------------------------------------------------------------------------
+# Ranked table
+# ---------------------------------------------------------------------------
+st.divider()
+st.subheader("Ranked Setups")
+
+display = ranked[[
+    "Ticker", "Score", "Days to Earnings", "Historical Consistency",
+    "Volume Ratio", "MA Position", "RSI",
+]].copy()
+
+
+def _score_style(row):
+    score = row["Score"]
+    if score >= 4:
+        color = GREEN
+    elif score >= 2:
+        color = AMBER
     else:
-        try:
-            with st.spinner(f"Fetching data for {ticker}…"):
-                data = get_research_data(ticker)
-                history = data["history"]
+        color = NEUTRAL
+    styles = [""] * len(row)
+    styles[row.index.get_loc("Score")] = f"color: {color}; font-weight: 700;"
+    ma = row["MA Position"]
+    if ma in ("Bullish", "Bearish"):
+        ma_color = GREEN if ma == "Bullish" else RED
+        styles[row.index.get_loc("MA Position")] = f"color: {ma_color}; font-weight: 600;"
+    return styles
 
-            if history.empty or "Close" not in history.columns:
-                st.error("Yahoo Finance is rate-limiting right now, or this ticker has no price history. Try again in 30 seconds.")
-                if st.button("Retry"):
-                    st.rerun()
-            else:
-                render_research(ticker, data)
-        except Exception as e:
-            st.error(f"Something went wrong while analyzing {ticker}: {type(e).__name__}: {e}")
+
+event = st.dataframe(
+    display.style.apply(_score_style, axis=1),
+    column_config={
+        "Ticker": st.column_config.TextColumn("Ticker"),
+        "Score": st.column_config.NumberColumn("Score", format="%d"),
+        "Days to Earnings": st.column_config.NumberColumn("Days to Earnings", format="%d"),
+        "Historical Consistency": st.column_config.TextColumn("Historical Consistency", width="medium"),
+        "Volume Ratio": st.column_config.NumberColumn("Volume Ratio", format="%.2fx"),
+        "MA Position": st.column_config.TextColumn("MA Position"),
+        "RSI": st.column_config.NumberColumn("RSI", format="%.1f"),
+    },
+    hide_index=True,
+    use_container_width=True,
+    height=600,
+    on_select="rerun",
+    selection_mode="single-row",
+)
+
+# ---------------------------------------------------------------------------
+# Detail view for the selected ticker
+# ---------------------------------------------------------------------------
+st.divider()
+
+selected_rows = event.selection.rows if event and event.selection else []
+if selected_rows:
+    sel_ticker = display.iloc[selected_rows[0]]["Ticker"]
+    with st.expander(f"{sel_ticker} — full detail", expanded=True):
+        detail_data = get_research_data(sel_ticker)
+        detail_history = detail_data["history"]
+        if detail_history.empty or "Close" not in detail_history.columns:
+            st.error("Yahoo Finance is rate-limiting right now, or this ticker has no price history. Try again in 30 seconds.")
+        else:
+            render_research(sel_ticker, detail_data)
+else:
+    st.caption("Select a row above to see the full detail breakdown for that ticker.")
 
 render_footer()
