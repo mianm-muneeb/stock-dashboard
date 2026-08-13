@@ -572,6 +572,40 @@ def get_option_chain(ticker: str, expiration: str) -> dict:
 # Valuation data
 # ---------------------------------------------------------------------------
 
+@st.cache_data(ttl=300, show_spinner=False)
+def get_research_data(ticker: str) -> dict:
+    """Fetch raw data for the Research Agent page: price/volume history (3y,
+    for 200MA + RSI + up to ~8 quarters of earnings-day moves), the earnings
+    calendar, and confirmed earnings dates.
+
+    Returns a dict with keys:
+        history        - 3y daily OHLCV DataFrame (empty if fetch failed)
+        calendar       - tk.calendar dict, or None if unavailable
+        earnings_dates - DataFrame from tk.get_earnings_dates(), or None
+    """
+    tk = _fetch_ticker(ticker)
+    if tk is None:
+        return {"history": pd.DataFrame(), "calendar": None, "earnings_dates": None}
+
+    history = _fetch_history(tk, period="3y", interval="1d")
+
+    calendar = None
+    try:
+        calendar = tk.calendar
+    except Exception:
+        calendar = None
+
+    earnings_dates = None
+    try:
+        ed = tk.get_earnings_dates(limit=12)
+        if ed is not None and not ed.empty:
+            earnings_dates = ed
+    except Exception:
+        earnings_dates = None
+
+    return {"history": history, "calendar": calendar, "earnings_dates": earnings_dates}
+
+
 @st.cache_data(ttl=3600, show_spinner=False)
 def get_valuation_data(ticker: str) -> dict:
     """Fetch raw data needed for the Valuation section.
