@@ -62,11 +62,7 @@ except Exception:
 def _fetch_ticker(symbol: str, retries: int = 5) -> yf.Ticker | None:
     for attempt in range(retries):
         try:
-            session = requests.Session()
-            session.headers.update({
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            })
-            tk = yf.Ticker(symbol, session=session)
+            tk = yf.Ticker(symbol, session=_YF_SESSION)
             info = tk.info
             if info and len(info) > 5:
                 return tk
