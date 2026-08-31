@@ -62,16 +62,33 @@ st.caption(
 # Filters
 # ---------------------------------------------------------------------------
 
-f1, f2, f3 = st.columns(3)
-with f1:
-    mcap_min = st.slider(
-        "Minimum market cap ($B)", 1, 500, 10,
-        help="Set to 500 for $500B+ (mega-caps, no upper cap)",
-    )
-with f2:
-    change_min = st.slider("Minimum change % (pre-market or regular)", 0.0, 10.0, 0.5, step=0.1)
-with f3:
-    vol_min = st.slider("Minimum avg daily volume (M)", 0.0, 50.0, 1.0, step=0.5)
+if "applied_filters" not in st.session_state:
+    st.session_state["applied_filters"] = {"mcap_min": 10, "change_min": 0.5, "vol_min": 1.0}
+
+with st.form("filters_form"):
+    f1, f2, f3 = st.columns(3)
+    with f1:
+        mcap_min = st.slider(
+            "Minimum market cap ($B)", 1, 500, st.session_state["applied_filters"]["mcap_min"],
+            help="Set to 500 for $500B+ (mega-caps, no upper cap)",
+        )
+    with f2:
+        change_min = st.slider(
+            "Minimum change % (pre-market or regular)", 0.0, 10.0,
+            st.session_state["applied_filters"]["change_min"], step=0.1,
+        )
+    with f3:
+        vol_min = st.slider(
+            "Minimum avg daily volume (M)", 0.0, 50.0,
+            st.session_state["applied_filters"]["vol_min"], step=0.5,
+        )
+    if st.form_submit_button("Apply Filters"):
+        st.session_state["applied_filters"] = {
+            "mcap_min": mcap_min, "change_min": change_min, "vol_min": vol_min,
+        }
+
+applied = st.session_state["applied_filters"]
+mcap_min, change_min, vol_min = applied["mcap_min"], applied["change_min"], applied["vol_min"]
 
 filtered = df[
     df["Market Cap"].notna() & (df["Market Cap"] >= mcap_min * 1e9)
