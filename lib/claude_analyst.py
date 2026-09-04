@@ -9,7 +9,7 @@ import streamlit as st
 
 from lib.config import get_groq_key
 
-MODEL = "llama-3.1-8b-instant"
+MODEL = "openai/gpt-oss-20b"
 
 SYSTEM_PROMPT = (
     "You are the analysis engine for 'Stock Market Analyst', a personal, "
