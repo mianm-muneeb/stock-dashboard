@@ -8,14 +8,18 @@ from __future__ import annotations
 
 import concurrent.futures
 import datetime as dt
+import random
+import time
 from zoneinfo import ZoneInfo
 
 import pandas as pd
 import streamlit as st
+import yfinance as yf
 
-from lib.market_data import NAME_MAP, _fetch_ticker
+from lib.market_data import _YF_SESSION, NAME_MAP
 
 ET = ZoneInfo("America/New_York")
+_SCAN_WORKERS = 15
 
 # 150 liquid, large-cap S&P 500 constituents across sectors, curated for a
 # pre-market watchlist.
@@ -58,11 +62,22 @@ def is_premarket_window(now: dt.datetime | None = None) -> bool:
     return start <= now < open_
 
 
-def _scan_one(ticker: str) -> dict | None:
-    tk = _fetch_ticker(ticker, retries=2)
-    if tk is None:
-        return None
-    info = tk.info
+def _scan_one(ticker: str) -> tuple[dict | None, str | None]:
+    """Return (row, error). error holds the last exception text when the
+    fetch failed, so the page can show *why* instead of a generic no-data
+    message (market_data._fetch_ticker swallows exceptions)."""
+    info, err = None, None
+    for attempt in range(2):
+        try:
+            info = yf.Ticker(ticker, session=_YF_SESSION).info
+            if info and len(info) > 5:
+                break
+            info, err = None, "empty response from Yahoo"
+        except Exception as e:
+            info, err = None, f"{type(e).__name__}: {e}"
+        time.sleep((2 ** attempt) + random.uniform(0, 1))
+    if info is None:
+        return None, f"{ticker}: {err}"
 
     pre_price = info.get("preMarketPrice")
     pre_pct = info.get("preMarketChangePercent")
@@ -82,17 +97,28 @@ def _scan_one(ticker: str) -> dict | None:
         "Avg Volume": info.get("averageVolume"),
         "52W Low": info.get("fiftyTwoWeekLow"),
         "52W High": info.get("fiftyTwoWeekHigh"),
-    }
+    }, None
 
 
 @st.cache_data(ttl=300, show_spinner=False)
 def scan_premarket(tickers: tuple[str, ...]) -> pd.DataFrame:
-    """Scan `tickers` for pre-market (or regular-session fallback) price data."""
-    rows = []
-    with concurrent.futures.ThreadPoolExecutor(max_workers=15) as executor:
-        for row in executor.map(_scan_one, tickers):
+    """Scan `tickers` for pre-market (or regular-session fallback) price data.
+
+    Raises RuntimeError (with the real underlying error) when no ticker
+    returned data; raising also keeps the failure out of the 5-minute cache.
+    """
+    rows, errors = [], []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=_SCAN_WORKERS) as executor:
+        for row, err in executor.map(_scan_one, tickers):
             if row:
                 rows.append(row)
+            elif err:
+                errors.append(err)
+    if not rows:
+        raise RuntimeError(
+            f"0 of {len(tickers)} tickers returned data. First error: "
+            f"{errors[0] if errors else 'none recorded'}"
+        )
     return pd.DataFrame(rows)
 
 

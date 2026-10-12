@@ -21,11 +21,11 @@ st.info(
 
 premarket_active = is_premarket_window()
 
-with st.spinner("Scanning watchlist..."):
-    universe_df = scan_premarket(tuple(PREMARKET_UNIVERSE))
-
-if universe_df.empty:
-    st.warning("No data available right now - try again shortly.")
+try:
+    with st.spinner("Scanning watchlist..."):
+        universe_df = scan_premarket(tuple(PREMARKET_UNIVERSE))
+except Exception as e:
+    st.error(f"Pre-market scan failed - {type(e).__name__}: {e}")
     render_footer()
     st.stop()
 
