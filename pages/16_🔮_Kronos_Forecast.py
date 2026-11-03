@@ -11,6 +11,9 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+# Streamlit Community Cloud mounts apps under /mount/src; its shared CPU gets throttled by heavy runs
+ON_CLOUD = ROOT.as_posix().startswith("/mount/src")
+
 from lib import kronos_utils as ku
 from lib.config import APP_NAME, inject_base_style, render_footer
 from utils.theme import apply_dark_plotly
@@ -55,7 +58,9 @@ tab_fc, tab_cal = st.tabs(["Forecast", "Calibration backtest"])
 with st.sidebar:
     ticker = st.text_input("Ticker", "NVDA").strip().upper()
     interval = st.selectbox("Bar size", ["1d", "1h"], index=0)
-    mode = st.radio("Model", ["Ensemble (small + base)", "Kronos-small", "Kronos-base"], index=0)
+    mode = st.radio("Model", ["Ensemble (small + base)", "Kronos-small", "Kronos-base"], index=1 if ON_CLOUD else 0)
+    if ON_CLOUD:
+        st.caption("Cloud CPU is shared and gets throttled. Use Kronos-small here; run Ensemble, Kronos-base and Calibration on your own PC.")
     horizon = st.slider("Forecast horizon (bars)", 5, 60, 20)
     lookback = st.slider("Lookback (bars)", 100, 512, 400)
     paths = st.slider("Simulated paths per model", 10, 80, 20, help="Ensemble on CPU takes a few minutes; Kronos-base is the slow one.")
@@ -195,6 +200,8 @@ def forecast_tab():
 # Calibration tab
 # ---------------------------------------------------------------------------
 def calibration_tab():
+    if ON_CLOUD:
+        st.warning("Calibration is CPU-heavy and Streamlit Cloud throttles heavy apps. Run this tab on your own PC (streamlit run app.py).")
     st.markdown(
         "Forecasts from several **past** dates, scored against what actually happened. "
         "A well-calibrated 90% band contains the real price about 90% of the time; "
