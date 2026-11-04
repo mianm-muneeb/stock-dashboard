@@ -54,12 +54,17 @@ SAVED_LOCAL = ROOT / "data" / "kronos"
 
 
 @st.cache_data(ttl=600, show_spinner=False)
+def _fetch_saved(rel: str):
+    # Raises on failure, and Streamlit does not cache exceptions, so a miss is retried on the next run
+    req = urllib.request.Request(f"{SAVED_BASE}/{rel}", headers={"User-Agent": "stock-dashboard"})
+    with urllib.request.urlopen(req, timeout=10) as r:
+        return json.loads(r.read().decode("utf-8"))
+
+
 def load_saved(rel: str):
     """Saved JSON from the kronos-data branch (falls back to ./data/kronos). None if unavailable."""
     try:
-        req = urllib.request.Request(f"{SAVED_BASE}/{rel}", headers={"User-Agent": "stock-dashboard"})
-        with urllib.request.urlopen(req, timeout=10) as r:
-            return json.loads(r.read().decode("utf-8"))
+        return _fetch_saved(rel)
     except Exception:
         p = SAVED_LOCAL / rel
         if p.exists():
