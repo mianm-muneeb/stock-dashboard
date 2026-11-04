@@ -197,13 +197,13 @@ def _animated_fan(ticker, hist, future, sims, raw, p05, p25, p50, p75, p95, last
     pad = (yhi - ylo) * 0.06
     span = (future[-1] - tail.index[0])
     fig.update_layout(
-        height=700, margin=dict(l=10, r=10, t=50, b=10),
+        height=720, margin=dict(l=20, r=90, t=50, b=70),
         paper_bgcolor="#07090f", plot_bgcolor="#07090f", font=dict(color="#9fb3c8"),
         title=dict(text=f"<b>{ticker}</b>  ·  Kronos projection  ·  next {H} bars", x=0.01, font=dict(size=20, color="#e8f4ff")),
-        xaxis=dict(range=[tail.index[0], future[-1] + span * 0.30], showgrid=True, gridcolor="rgba(0,229,255,.06)",
+        xaxis=dict(automargin=True, tickfont=dict(size=13), range=[tail.index[0], future[-1] + span * 0.30], showgrid=True, gridcolor="rgba(0,229,255,.06)",
                    zeroline=False, showspikes=True, spikecolor="rgba(0,229,255,.4)", spikethickness=1),
         yaxis=dict(range=[ylo - pad, yhi + pad], showgrid=True, gridcolor="rgba(0,229,255,.06)", zeroline=False,
-                   side="right", tickformat=",.0f"),
+                   side="right", tickformat=",.0f", automargin=True, tickfont=dict(size=13)),
         legend=dict(orientation="h", y=1.04, x=1, xanchor="right", bgcolor="rgba(0,0,0,0)"),
         hovermode="x unified",
         shapes=[dict(type="line", x0=x0, x1=x0, y0=0, y1=1, yref="paper", line=dict(color="rgba(255,255,255,.25)", width=1, dash="dash"))],
@@ -223,8 +223,8 @@ def _animated_fan(ticker, hist, future, sims, raw, p05, p25, p50, p75, p95, last
                                                          transition=dict(duration=0), mode="immediate")])])],
     )
     html = fig.to_html(include_plotlyjs="cdn", full_html=False, auto_play=True, config={"displayModeBar": False},
-                       default_height="700px")
-    components.html(f'<div style="background:#07090f">{html}</div>', height=715)
+                       default_height="720px")
+    components.html(f'<div style="background:#07090f;padding-bottom:12px">{html}</div>', height=760)
 
 
 # ---------------------------------------------------------------------------
