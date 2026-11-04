@@ -283,6 +283,21 @@ def forecast_tab():
     c3.metric("Paths ending higher", f"{prob_up * 100:.0f}%")
     c4.metric("5-95% end range", f"{p05[-1]:,.0f} - {p95[-1]:,.0f}")
 
+    # Risk box: what the data supports (range + stop + size), not a direction call
+    with st.container(border=True):
+        st.markdown("**Risk box** (the backtests support the range, not the direction)")
+        rc1, rc2 = st.columns(2)
+        risk_usd = rc1.number_input("Most you accept to lose on this trade ($)", 10.0, 100000.0, 50.0, 10.0, key="kr_risk")
+        stop = float(p05[len(p05) // 2])
+        per_share = max(last_close - stop, 1e-9)
+        shares = int(risk_usd // per_share)
+        rc2.metric("Stop level (5% line, mid-forecast)", f"{stop:,.2f}", f"{(stop / last_close - 1) * 100:+.1f}%")
+        st.write(
+            f"Buy about **{shares} shares** (~${shares * last_close:,.0f}) so hitting the stop costs about ${risk_usd:,.0f}. "
+            f"Likely range at the end: **{p05[-1]:,.0f} to {p95[-1]:,.0f}** (held about 80% of the time in 2025 tests). "
+            f"Direction: no reliable edge. Large stocks were simply up after 3 months about 65% of the time in 2016-2026."
+        )
+
     # Model agreement
     if len(results) == 2:
         cons = ku.consensus(adj_parts[0], adj_parts[1], last_close, sigma)

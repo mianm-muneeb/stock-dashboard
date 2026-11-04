@@ -51,10 +51,12 @@ def main():
             sims = np.concatenate(parts, axis=0)
             for h in CHECK:
                 col = sims[:, h - 1]
+                cons = ku.consensus(parts[0][:, :h], parts[1][:, :h], last, sigma)
                 p05, p25, p50, p75, p95 = np.percentile(col, [5, 25, 50, 75, 95])
                 act = float(actual["close"].iloc[h - 1])
                 rows.append(dict(ticker=t, origin=str(hist.index[-1].date()), h=h, last=last,
                                  pred_med_pct=(p50 / last - 1) * 100, act_pct=(act / last - 1) * 100,
+                                 agree=bool(cons["agree"]), prob_up=float((col > last).mean()),
                                  in90=bool(p05 <= act <= p95), in50=bool(p25 <= act <= p75),
                                  dir_hit=bool((p50 > last) == (act > last)),
                                  err=abs(p50 / last - act / last) * 100, naive_err=abs(act / last - 1) * 100,
@@ -71,6 +73,17 @@ def main():
     print(df.groupby("h").agg(n=("in90", "size"), in90=("in90", "mean"), in50=("in50", "mean"),
                               dir_hit=("dir_hit", "mean"), err=("err", "mean"),
                               naive_err=("naive_err", "mean")).round(2).to_string())
+    df["conf_dir"] = np.where(df.prob_up >= 0.7, 1, np.where(df.prob_up <= 0.3, -1, 0))
+    c = df[df.agree & (df.conf_dir != 0)].copy()
+    c["hit"] = (np.sign(c.act_pct) == c.conf_dir)
+    c["signed_ret"] = c.act_pct * c.conf_dir
+    print("CONFIDENT CALLS (models agree and >=70% of paths one way)")
+    if len(c):
+        print(c.groupby("h").agg(n=("hit", "size"), hit=("hit", "mean"), avg_signed_ret=("signed_ret", "mean")).round(2).to_string())
+        print("long-only:", c[c.conf_dir == 1].groupby("h").agg(n=("hit", "size"), hit=("hit", "mean"), avg_ret=("act_pct", "mean")).round(2).to_string())
+    else:
+        print("none")
+    print("ALL forecasts hit rate by h:", (np.sign(df.act_pct) == np.where(df.pred_med_pct > 0, 1, -1)).groupby(df.h).mean().round(2).to_dict())
     print("RESULTS_WRITTEN", out)
 
 
