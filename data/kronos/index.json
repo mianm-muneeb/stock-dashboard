@@ -1,5 +1,5 @@
 {
- "generated_at": "2026-11-04T03:35:17+00:00",
+ "generated_at": "2026-11-04T04:02:58+00:00",
  "forecasts": [
   {
    "ticker": "NFLX",
@@ -54,5 +54,8 @@
    "earnings_in_window": true
   }
  ],
- "calibrations": []
+ "calibrations": [
+  "calibration_base.json",
+  "calibration_small.json"
+ ]
 }
