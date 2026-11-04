@@ -85,13 +85,15 @@ st.caption(
     "rescaled to the stock's real volatility. It is not a price target."
 )
 
-tab_saved, tab_fc, tab_cal = st.tabs(["Full model (saved)", "Live forecast", "Calibration"])
+with st.form("kr_form", border=False):
+    _c1, _c2 = st.columns([3, 1])
+    ticker = _c1.text_input("Ticker (ASX: BHP.AX)", "", placeholder="e.g. VST").strip().upper()
+    go_btn = _c2.form_submit_button("Run forecast", type="primary", use_container_width=True)
 
 # ---------------------------------------------------------------------------
 # Sidebar (forecast settings)
 # ---------------------------------------------------------------------------
 with st.sidebar:
-    ticker = st.text_input("Ticker", "NVDA").strip().upper()
     interval = st.selectbox("Bar size", ["1d", "1h"], index=0)
     mode = st.radio("Model", ["Ensemble (small + base)", "Kronos-small", "Kronos-base"], index=1 if ON_CLOUD else 0)
     if ON_CLOUD:
@@ -109,11 +111,10 @@ with st.sidebar:
                            help="0 = random walk from last close, 1 = trust the model fully. Use the Calibration tab to choose.")
     show_raw = st.checkbox("Show raw model band", value=False)
     holdout = st.checkbox("Reality check: hide the last N bars and compare", value=False)
-    go_btn = st.button("Run forecast", type="primary")
 
 PARAM_KEYS = ["ticker", "interval", "mode", "horizon", "lookback", "paths", "temp", "top_p",
               "use_anchor", "use_rescale", "drift_keep", "show_raw", "holdout"]
-if go_btn:
+if go_btn and ticker:
     # A button is only True for one rerun; keep the settings so other widgets
     # (like "Show it anyway") don't wipe the forecast.
     _g = globals()
@@ -453,14 +454,8 @@ def saved_calibration():
             st.dataframe(pd.DataFrame(c["records"]), use_container_width=True)
 
 
-with tab_saved:
-    saved_tab()
-with tab_fc:
-    forecast_tab()
-with tab_cal:
-    saved_calibration()
-    st.divider()
-    st.subheader("Run your own calibration")
+forecast_tab()
+with st.expander("Calibration (optional)"):
     calibration_tab()
 
 render_footer()
