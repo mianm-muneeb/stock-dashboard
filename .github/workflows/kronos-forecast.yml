@@ -1,0 +1,135 @@
+name: Kronos forecast (nightly)
+
+# Runs the full Kronos Ensemble (small + base) on GitHub's free runners
+# (4 vCPU / 16 GB on public repos) and publishes the results to the kronos-data branch.
+# The Streamlit page reads them from there.
+
+on:
+  schedule:
+    - cron: "30 22 * * 1-5"   # 22:30 UTC Mon-Fri, after the US close (about 9:30am next day in Sydney)
+  workflow_dispatch:
+    inputs:
+      tickers:
+        description: "Extra tickers, comma separated (added to scripts/kronos_watchlist.txt)"
+        required: false
+        default: ""
+      paths:
+        description: "Simulated paths per model"
+        required: false
+        default: "40"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/kronos-forecast.yml"
+      - "scripts/kronos_precompute.py"
+      - "scripts/kronos_publish.sh"
+      - "scripts/kronos_watchlist.txt"
+      - "scripts/requirements-kronos.txt"
+      - "lib/kronos_utils.py"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: kronos-forecast
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      tickers: ${{ steps.t.outputs.tickers }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: t
+        env:
+          EXTRA: ${{ github.event.inputs.tickers }}
+        run: |
+          python3 - <<'PY'
+          import json, os, re
+
+          def read(path):
+              out = []
+              for line in open(path, encoding="utf-8"):
+                  line = line.split("#")[0]
+                  out += [x.upper() for x in re.split(r"[,\s]+", line) if x]
+              return out
+
+          ok = re.compile(r"^[A-Z0-9.^=\-]{1,12}$")
+          extra = [x.upper() for x in re.split(r"[,\s]+", os.environ.get("EXTRA", "")) if x]
+          tickers = [t for t in dict.fromkeys(read("scripts/kronos_watchlist.txt") + extra) if ok.match(t)]
+          if not tickers:
+              raise SystemExit("watchlist is empty")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write("tickers=" + json.dumps(tickers) + "\n")
+          print(tickers)
+          PY
+
+  forecast:
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        ticker: ${{ fromJson(needs.plan.outputs.tickers) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: scripts/requirements-kronos.txt
+
+      - name: Cache Kronos weights
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: hf-kronos-v1
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -r scripts/requirements-kronos.txt
+
+      - name: Forecast
+        env:
+          TICKER: ${{ matrix.ticker }}
+          PATHS: ${{ github.event.inputs.paths || '40' }}
+          HF_HUB_DISABLE_TELEMETRY: "1"
+          TOKENIZERS_PARALLELISM: "false"
+        run: python scripts/kronos_precompute.py forecast --tickers "$TICKER" --paths "$PATHS" --out out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kronos-fc-${{ strategy.job-index }}
+          path: out
+          if-no-files-found: error
+          retention-days: 3
+
+  publish:
+    needs: forecast
+    if: ${{ !cancelled() && needs.forecast.result != 'skipped' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          path: incoming
+          pattern: kronos-fc-*
+          merge-multiple: true
+
+      - name: Publish to kronos-data branch
+        run: |
+          cp scripts/kronos_publish.sh /tmp/kronos_publish.sh
+          sed -i 's/\r$//' /tmp/kronos_publish.sh
+          bash /tmp/kronos_publish.sh

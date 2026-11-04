@@ -1,0 +1,100 @@
+name: Kronos calibration (weekly)
+
+# Backtests Kronos-small and Kronos-base on past dates (forecast vs what actually happened)
+# for the first tickers in scripts/kronos_watchlist.txt, then publishes to the kronos-data branch.
+
+on:
+  schedule:
+    - cron: "0 12 * * 6"   # Saturday 12:00 UTC
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/kronos-calibrate.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: kronos-calibrate
+  cancel-in-progress: false
+
+jobs:
+  calibrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 170
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - model: small
+            max_tickers: 6
+            origins: 8
+            paths: 20
+          - model: base
+            max_tickers: 4
+            origins: 5
+            paths: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: scripts/requirements-kronos.txt
+
+      - name: Cache Kronos weights
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: hf-kronos-v1
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -r scripts/requirements-kronos.txt
+
+      - name: Calibrate
+        env:
+          HF_HUB_DISABLE_TELEMETRY: "1"
+          TOKENIZERS_PARALLELISM: "false"
+        run: >
+          python scripts/kronos_precompute.py calibrate
+          --watchlist scripts/kronos_watchlist.txt
+          --max-tickers ${{ matrix.max_tickers }}
+          --model ${{ matrix.model }}
+          --origins ${{ matrix.origins }}
+          --paths ${{ matrix.paths }}
+          --out out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kronos-cal-${{ matrix.model }}
+          path: out
+          if-no-files-found: error
+          retention-days: 3
+
+  publish:
+    needs: calibrate
+    if: ${{ !cancelled() && needs.calibrate.result != 'skipped' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          path: incoming
+          pattern: kronos-cal-*
+          merge-multiple: true
+
+      - name: Publish to kronos-data branch
+        run: |
+          cp scripts/kronos_publish.sh /tmp/kronos_publish.sh
+          sed -i 's/\r$//' /tmp/kronos_publish.sh
+          bash /tmp/kronos_publish.sh
