@@ -153,15 +153,15 @@ def _animated_fan(ticker, hist, future, sims, raw, p05, p25, p50, p75, p95, last
                                  hoverinfo="skip", showlegend=False))
     i95 = len(fig.data)
     fig.add_trace(go.Scatter(x=[x0], y=[last_close], fill="toself", fillcolor=f"rgba({CY},.10)",
-                             line=dict(color=f"rgba({CY},.35)", width=1, dash="dot"), name="5-95%", hoverinfo="skip"))
+                             line=dict(color=f"rgba({CY},.35)", width=1, dash="dot"), name="90% of outcomes land here", hoverinfo="skip"))
     i75 = len(fig.data)
     fig.add_trace(go.Scatter(x=[x0], y=[last_close], fill="toself", fillcolor=f"rgba({CY},.22)",
-                             line=dict(width=0), name="25-75%", hoverinfo="skip"))
+                             line=dict(width=0), name="Most likely zone (50%)", hoverinfo="skip"))
     iglow = len(fig.data)
     fig.add_trace(go.Scatter(x=[x0], y=[last_close], mode="lines", line=dict(color=f"rgba({CY},.28)", width=12),
                              hoverinfo="skip", showlegend=False))
     imed = len(fig.data)
-    fig.add_trace(go.Scatter(x=[x0], y=[last_close], mode="lines", name="Median path", line=dict(color=f"rgb({CY})", width=3),
+    fig.add_trace(go.Scatter(x=[x0], y=[last_close], mode="lines", name="Middle outcome", line=dict(color=f"rgb({CY})", width=3),
                              hovertemplate="%{x|%d %b %Y}: %{y:,.2f}<extra>median</extra>"))
     ihg = len(fig.data)
     fig.add_trace(go.Scatter(x=[x0], y=[last_close], mode="markers", marker=dict(size=26, color=f"rgba({MG},.25)"),
@@ -200,14 +200,22 @@ def _animated_fan(ticker, hist, future, sims, raw, p05, p25, p50, p75, p95, last
         height=700, margin=dict(l=10, r=10, t=50, b=10),
         paper_bgcolor="#07090f", plot_bgcolor="#07090f", font=dict(color="#9fb3c8"),
         title=dict(text=f"<b>{ticker}</b>  ·  Kronos projection  ·  next {H} bars", x=0.01, font=dict(size=20, color="#e8f4ff")),
-        xaxis=dict(range=[tail.index[0], future[-1] + span * 0.12], showgrid=True, gridcolor="rgba(0,229,255,.06)",
+        xaxis=dict(range=[tail.index[0], future[-1] + span * 0.30], showgrid=True, gridcolor="rgba(0,229,255,.06)",
                    zeroline=False, showspikes=True, spikecolor="rgba(0,229,255,.4)", spikethickness=1),
         yaxis=dict(range=[ylo - pad, yhi + pad], showgrid=True, gridcolor="rgba(0,229,255,.06)", zeroline=False,
                    side="right", tickformat=",.0f"),
         legend=dict(orientation="h", y=1.04, x=1, xanchor="right", bgcolor="rgba(0,0,0,0)"),
         hovermode="x unified",
         shapes=[dict(type="line", x0=x0, x1=x0, y0=0, y1=1, yref="paper", line=dict(color="rgba(255,255,255,.25)", width=1, dash="dash"))],
-        annotations=[dict(x=x0, y=1, yref="paper", text="NOW", showarrow=False, xanchor="right", font=dict(size=11, color="#7e93a8"))],
+        annotations=[dict(x=x0, y=1, yref="paper", text="NOW", showarrow=False, xanchor="right", font=dict(size=11, color="#7e93a8"))]
+        + [dict(x=future[-1], y=float(v), text=f"<b>{lab}</b>  {v:,.0f}  ({(v / last_close - 1) * 100:+.0f}%)", showarrow=False,
+                xanchor="left", xshift=10, font=dict(size=12, color=col))
+           for lab, v, col in (("Best case (top 5%)", P95[-1], "#6fe3a0"), ("Upper likely", P75[-1], "#8fd9ff"),
+                               ("Lower likely", P25[-1], "#8fd9ff"), ("Worst case (bottom 5%)", P05[-1], "#ff8a8a"))]
+        + [dict(x=tail.index[len(tail) // 2], y=1.0, yref="paper", text="PAST (real prices)", showarrow=False,
+                font=dict(size=12, color="#7e93a8"))]
+        + [dict(x=future[len(future) // 2], y=1.0, yref="paper", text="FUTURE (simulated, not a prediction)", showarrow=False,
+                font=dict(size=12, color="#7e93a8"))],
         updatemenus=[dict(type="buttons", showactive=False, x=0.01, y=0.99, xanchor="left", yanchor="top",
                           bgcolor="#0f1722", bordercolor="rgba(0,229,255,.5)", font=dict(color="#00e5ff"),
                           buttons=[dict(label="⟲ Replay", method="animate",
