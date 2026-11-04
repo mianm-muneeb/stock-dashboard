@@ -79,7 +79,8 @@ def sell_check(closes: pd.DataFrame, holdings: list[tuple[str, pd.Timestamp | No
     rows = []
     for t, bought in holdings:
         if t not in closes.columns or closes[t].dropna().shape[0] < 2:
-            rows.append({"ticker": t, "last": np.nan, "day %": np.nan, "days held": None, "action": "no price data"})
+            rows.append({"ticker": t, "last close": np.nan, "day %": np.nan, "days held": None, "action": "no price data",
+                         "next: sell if it closes above": np.nan})
             continue
         s = closes[t].dropna()
         up = bool(s.iloc[-1] > s.iloc[-2])
@@ -92,6 +93,7 @@ def sell_check(closes: pd.DataFrame, holdings: list[tuple[str, pd.Timestamp | No
             action = "SELL at the close (10-day limit)"
         else:
             action = "HOLD"
-        rows.append({"ticker": t, "last": float(s.iloc[-1]), "day %": (s.iloc[-1] / s.iloc[-2] - 1) * 100,
-                     "days held": held, "action": action})
+        rows.append({"ticker": t, "last close": float(s.iloc[-1]), "day %": (s.iloc[-1] / s.iloc[-2] - 1) * 100,
+                     "days held": held, "action": action,
+                     "next: sell if it closes above": float(s.iloc[-1]) if action.startswith("HOLD") else np.nan})
     return pd.DataFrame(rows)
