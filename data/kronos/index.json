@@ -1,15 +1,15 @@
 {
- "generated_at": "2026-11-04T04:02:58+00:00",
+ "generated_at": "2026-11-04T09:17:44+00:00",
  "forecasts": [
   {
    "ticker": "NFLX",
    "file": "NFLX.json",
-   "generated_at": "2026-11-04T03:35:04+00:00",
+   "generated_at": "2026-11-04T09:16:55+00:00",
    "last_date": "2026-11-03",
    "last_close": 63.42,
    "horizon": 20,
-   "ensemble_median_end_pct": 15.35,
-   "ensemble_prob_up": 0.9,
+   "ensemble_median_end_pct": 15.08,
+   "ensemble_prob_up": 0.838,
    "agree": false,
    "earnings_date": "2027-01-19",
    "earnings_in_window": false
@@ -17,12 +17,12 @@
   {
    "ticker": "NVDA",
    "file": "NVDA.json",
-   "generated_at": "2026-11-04T03:34:03+00:00",
+   "generated_at": "2026-11-04T09:12:33+00:00",
    "last_date": "2026-11-03",
    "last_close": 206.69,
    "horizon": 20,
-   "ensemble_median_end_pct": -2.14,
-   "ensemble_prob_up": 0.388,
+   "ensemble_median_end_pct": -1.36,
+   "ensemble_prob_up": 0.438,
    "agree": true,
    "earnings_date": "2026-11-17",
    "earnings_in_window": true
@@ -30,12 +30,12 @@
   {
    "ticker": "ORCL",
    "file": "ORCL.json",
-   "generated_at": "2026-11-04T03:32:35+00:00",
+   "generated_at": "2026-11-04T09:13:40+00:00",
    "last_date": "2026-11-03",
    "last_close": 126.19,
    "horizon": 20,
-   "ensemble_median_end_pct": 8.64,
-   "ensemble_prob_up": 0.662,
+   "ensemble_median_end_pct": 5.59,
+   "ensemble_prob_up": 0.65,
    "agree": false,
    "earnings_date": "2026-12-14",
    "earnings_in_window": false
@@ -43,11 +43,11 @@
   {
    "ticker": "VST",
    "file": "VST.json",
-   "generated_at": "2026-11-04T03:33:40+00:00",
+   "generated_at": "2026-11-04T09:17:33+00:00",
    "last_date": "2026-11-03",
    "last_close": 139.59,
    "horizon": 20,
-   "ensemble_median_end_pct": 6.0,
+   "ensemble_median_end_pct": 4.6,
    "ensemble_prob_up": 0.613,
    "agree": true,
    "earnings_date": "2026-11-06",
