@@ -1,0 +1,8 @@
+# Tickers the nightly Kronos job forecasts (Ensemble = Kronos-small + Kronos-base).
+# One or more per line, comma or space separated, '#' starts a comment. ASX uses .AX (BHP.AX).
+# The first six are also used for the weekly calibration backtest, so keep the ones you care about on top.
+# Saving a change to this file on main re-runs the nightly job straight away.
+VST
+ORCL
+NFLX
+NVDA

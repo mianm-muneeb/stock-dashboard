@@ -1,5 +1,8 @@
 """Kronos Forecast: multi-path candlestick forecast with calibration fixes and a backtest tab."""
+import json
 import sys
+import urllib.parse
+import urllib.request
 from pathlib import Path
 
 import numpy as np
@@ -44,13 +47,36 @@ def load_earnings(ticker: str):
     return ku.next_earnings_date(ticker)
 
 
+# Full-model results are computed on GitHub Actions (free 4-core runners) and published to the
+# kronos-data branch; this page only reads them, so the app never runs the heavy models.
+SAVED_BASE = "https://raw.githubusercontent.com/muneeb7777/stock-dashboard/kronos-data/data/kronos"
+SAVED_LOCAL = ROOT / "data" / "kronos"
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def load_saved(rel: str):
+    """Saved JSON from the kronos-data branch (falls back to ./data/kronos). None if unavailable."""
+    try:
+        req = urllib.request.Request(f"{SAVED_BASE}/{rel}", headers={"User-Agent": "stock-dashboard"})
+        with urllib.request.urlopen(req, timeout=10) as r:
+            return json.loads(r.read().decode("utf-8"))
+    except Exception:
+        p = SAVED_LOCAL / rel
+        if p.exists():
+            try:
+                return json.loads(p.read_text(encoding="utf-8"))
+            except Exception:
+                return None
+        return None
+
+
 st.title("🔮 Kronos Forecast")
 st.caption(
     "Open-source candlestick model (Kronos, MIT). The fan is a spread of simulated paths, "
     "rescaled to the stock's real volatility. It is not a price target."
 )
 
-tab_fc, tab_cal = st.tabs(["Forecast", "Calibration backtest"])
+tab_saved, tab_fc, tab_cal = st.tabs(["Full model (saved)", "Live forecast", "Calibration"])
 
 # ---------------------------------------------------------------------------
 # Sidebar (forecast settings)
@@ -60,7 +86,8 @@ with st.sidebar:
     interval = st.selectbox("Bar size", ["1d", "1h"], index=0)
     mode = st.radio("Model", ["Ensemble (small + base)", "Kronos-small", "Kronos-base"], index=1 if ON_CLOUD else 0)
     if ON_CLOUD:
-        st.caption("Cloud CPU is shared and gets throttled. Use Kronos-small here; run Ensemble, Kronos-base and Calibration on your own PC.")
+        st.caption("These settings drive the Live forecast tab. Cloud CPU is shared and throttled, so use Kronos-small here. "
+                   "Ensemble and Kronos-base results are precomputed nightly in the Full model (saved) tab.")
     horizon = st.slider("Forecast horizon (bars)", 5, 60, 20)
     lookback = st.slider("Lookback (bars)", 100, 512, 400)
     paths = st.slider("Simulated paths per model", 10, 80, 20, help="Ensemble on CPU takes a few minutes; Kronos-base is the slow one.")
@@ -201,7 +228,8 @@ def forecast_tab():
 # ---------------------------------------------------------------------------
 def calibration_tab():
     if ON_CLOUD:
-        st.warning("Calibration is CPU-heavy and Streamlit Cloud throttles heavy apps. Run this tab on your own PC (streamlit run app.py).")
+        st.warning("Running calibration here is CPU-heavy and Streamlit Cloud throttles heavy apps. "
+                   "The weekly saved results are above; run your own on a local copy (streamlit run app.py).")
     st.markdown(
         "Forecasts from several **past** dates, scored against what actually happened. "
         "A well-calibrated 90% band contains the real price about 90% of the time; "
@@ -270,9 +298,160 @@ def calibration_tab():
         st.dataframe(df, use_container_width=True)
 
 
+# ---------------------------------------------------------------------------
+# Saved full-model tab (Ensemble / small / base, computed nightly on GitHub Actions)
+# ---------------------------------------------------------------------------
+def _hours_since(iso: str) -> float:
+    t = pd.Timestamp(iso)
+    t = t.tz_localize("UTC") if t.tzinfo is None else t.tz_convert("UTC")
+    return (pd.Timestamp.now(tz="UTC") - t).total_seconds() / 3600
+
+
+def _ago(hours: float) -> str:
+    return f"{hours:.0f} h ago" if hours < 48 else f"{hours / 24:.0f} days ago"
+
+
+def saved_tab():
+    idx = load_saved("index.json")
+    if not idx or not idx.get("forecasts"):
+        st.info("No saved run yet. On GitHub open Actions, pick **Kronos forecast (nightly)** and press Run workflow. "
+                "The first run takes about 15 minutes.")
+        return
+    rows = idx["forecasts"]
+    hrs = _hours_since(idx["generated_at"])
+    st.caption(
+        "Ensemble = Kronos-small + Kronos-base, computed on GitHub's free 4-core runners every weekday after the US close. "
+        f"Last update {_ago(hrs)}."
+    )
+    if hrs > 80:
+        st.warning("These results are more than 3 days old, so the nightly job may have failed.")
+
+    table = pd.DataFrame([{
+        "Ticker": r["ticker"],
+        "Last close": r["last_close"],
+        "Last bar": r["last_date"],
+        "Ensemble median end": f"{r['ensemble_median_end_pct']:+.1f}%",
+        "Paths ending higher": f"{r['ensemble_prob_up'] * 100:.0f}%",
+        "Small vs base": "agree" if r["agree"] else "disagree",
+        "Earnings in window": (r["earnings_date"] or "yes") if r["earnings_in_window"] else "no",
+    } for r in rows])
+    st.dataframe(table, hide_index=True, use_container_width=True)
+
+    c1, c2 = st.columns([1, 2])
+    pick = c1.selectbox("Ticker", [r["ticker"] for r in rows], key="kr_saved_ticker")
+    which = c2.radio("Model", ["Ensemble", "Small", "Base"], horizontal=True, key="kr_saved_model")
+    row = next(r for r in rows if r["ticker"] == pick)
+    d = load_saved("forecasts/" + urllib.parse.quote(row["file"]))
+    if not d:
+        st.error("Could not load that forecast file.")
+        return
+
+    if d.get("earnings_in_window"):
+        st.warning(
+            f"{pick} reports earnings on {d['earnings_date']}, inside this forecast window. "
+            "Kronos cannot see events, so treat the fan as noise."
+        )
+        if not st.checkbox("Show it anyway", value=False, key=f"kr_saved_anyway_{pick}"):
+            return
+
+    v = d["variants"][which.lower()]
+    hist_x = pd.to_datetime(d["history"]["dates"])
+    fut = pd.to_datetime(d["future_dates"])
+    last_close = d["last_close"]
+    show_raw_saved = st.checkbox("Show raw model band", value=False, key="kr_saved_raw")
+
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=hist_x, y=d["history"]["close"], name="History", line=dict(color="#e6e6e6", width=2)))
+    for path in v["paths"]:
+        fig.add_trace(go.Scatter(x=fut, y=path, mode="lines", line=dict(color="rgba(63,163,245,.15)", width=1),
+                                 showlegend=False, hoverinfo="skip"))
+    if show_raw_saved:
+        fig.add_trace(go.Scatter(x=list(fut) + list(fut[::-1]), y=v["raw_p95"] + v["raw_p05"][::-1], fill="toself",
+                                 fillcolor="rgba(255,176,32,.08)", line=dict(color="rgba(255,176,32,.5)", dash="dot", width=1),
+                                 name="Raw model 5-95%"))
+    fig.add_trace(go.Scatter(x=list(fut) + list(fut[::-1]), y=v["p95"] + v["p05"][::-1], fill="toself",
+                             fillcolor="rgba(63,163,245,.12)", line=dict(width=0), name="5-95%"))
+    fig.add_trace(go.Scatter(x=list(fut) + list(fut[::-1]), y=v["p75"] + v["p25"][::-1], fill="toself",
+                             fillcolor="rgba(63,163,245,.25)", line=dict(width=0), name="25-75%"))
+    fig.add_trace(go.Scatter(x=fut, y=v["p50"], name="Median path", line=dict(color=BLUE, width=3)))
+    apply_dark_plotly(fig)
+    fig.update_layout(height=540, margin=dict(l=10, r=10, t=30, b=10), legend=dict(orientation="h"), yaxis_title="Close")
+    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Last close", f"{last_close:,.2f}")
+    m2.metric("Median end", f"{v['p50'][-1]:,.2f}", f"{v['median_end_pct']:+.1f}%")
+    m3.metric("Paths ending higher", f"{v['prob_up'] * 100:.0f}%")
+    m4.metric("5-95% end range", f"{v['p05'][-1]:,.0f} - {v['p95'][-1]:,.0f}")
+
+    cons = d["consensus"]
+    if cons["agree"]:
+        st.success(f"Models agree: {cons['direction']} (small {cons['a'] * 100:+.1f}%, base {cons['b'] * 100:+.1f}% median).")
+    else:
+        st.error(f"No consensus: small says {cons['a'] * 100:+.1f}%, base says {cons['b'] * 100:+.1f}%. Treat as no view.")
+
+    st.caption(
+        f"{d['horizon']} bars ahead from {d['last_date']}. Realised one-bar volatility {d['sigma_pct']:.2f}%. "
+        f"{d['paths_per_model']} paths per model, drift trust {d['drift_keep']}, lookback {d['lookback']} bars."
+    )
+
+
+def _cal_verdict(summ: pd.DataFrame, margin: float):
+    if "adjusted" not in summ.index:
+        return
+    adj = summ.loc["adjusted"]
+    cov = adj["actual inside 90% band"]
+    if 82 <= cov <= 96:
+        st.success(f"Adjusted 90% band is roughly calibrated ({cov:.0f}% coverage).")
+    else:
+        st.warning(f"Adjusted 90% band covers {cov:.0f}% (target 90%). Don't trust the fan width yet.")
+    if adj["direction right"] < 50 + margin:
+        st.warning("Direction accuracy is within coin-flip noise: keep 'Trust in model drift' low.")
+    else:
+        st.success("Direction beats coin-flip noise on this sample.")
+    if adj["median error"] >= adj["'no change' error"]:
+        st.warning("The model's median is no closer to the real price than 'no change'.")
+    else:
+        st.success("The model's median lands closer to the real price than 'no change'.")
+
+
+def saved_calibration():
+    idx = load_saved("index.json")
+    cals = (idx or {}).get("calibrations") or []
+    if not cals:
+        st.info("No saved calibration yet. It runs every Saturday on GitHub Actions.")
+        return
+    st.subheader("Saved calibration (weekly, GitHub runner)")
+    for fn in cals:
+        c = load_saved(fn)
+        if not c:
+            continue
+        summ = pd.DataFrame(c["summary"]).set_index("variant")
+        n = int(summ["n forecasts"].iloc[0])
+        margin = 1.96 * np.sqrt(0.25 / max(n, 1)) * 100
+        st.markdown(
+            f"**Kronos-{c['model']}** on {', '.join(c['tickers'])}: {c['horizon']}-bar forecasts from the last "
+            f"{c['origins']} non-overlapping dates each, {c['paths']} paths, drift trust {c['drift_keep']}. "
+            f"Run {_ago(_hours_since(c['generated_at']))}."
+        )
+        st.dataframe(summ, use_container_width=True)
+        st.caption(
+            f"n = {n} per variant. Direction hit rate is only meaningful if it is above 50% by more than about ±{margin:.0f} points. "
+            "'Median error' is the average miss of the median end price; compare it with the 'no change' error."
+        )
+        _cal_verdict(summ, margin)
+        with st.expander(f"Every forecast (Kronos-{c['model']})"):
+            st.dataframe(pd.DataFrame(c["records"]), use_container_width=True)
+
+
+with tab_saved:
+    saved_tab()
 with tab_fc:
     forecast_tab()
 with tab_cal:
+    saved_calibration()
+    st.divider()
+    st.subheader("Run your own calibration")
     calibration_tab()
 
 render_footer()
