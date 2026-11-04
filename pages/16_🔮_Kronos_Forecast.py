@@ -32,9 +32,13 @@ BLUE = "#3fa3f5"
 def load_predictor(model_id: str):
     from kronos_model import Kronos, KronosPredictor, KronosTokenizer
 
+    import torch
+
+    # Uses the GPU automatically when this machine has a CUDA build of PyTorch (Streamlit Cloud has none)
+    device = "cuda" if torch.cuda.is_available() else "cpu"
     tokenizer = KronosTokenizer.from_pretrained("NeoQuasar/Kronos-Tokenizer-base")
     model = Kronos.from_pretrained(model_id)
-    return KronosPredictor(model, tokenizer, device="cpu", max_context=512)
+    return KronosPredictor(model, tokenizer, device=device, max_context=512)
 
 
 @st.cache_data(ttl=3600, show_spinner=False)

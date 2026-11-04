@@ -47,9 +47,11 @@ def load_predictor(name: str):
     torch.set_num_threads(os.cpu_count() or 2)
     from kronos_model import Kronos, KronosPredictor, KronosTokenizer
 
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    print(f"Kronos-{name} on {device}", flush=True)
     tokenizer = KronosTokenizer.from_pretrained("NeoQuasar/Kronos-Tokenizer-base")
     model = Kronos.from_pretrained(MODEL_IDS[name])
-    return KronosPredictor(model, tokenizer, device="cpu", max_context=512)
+    return KronosPredictor(model, tokenizer, device=device, max_context=512)
 
 
 # ----------------------------------------------------------------------------
