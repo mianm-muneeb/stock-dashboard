@@ -117,7 +117,9 @@ def rescale_to_vol(sims: np.ndarray, last_close: float, sigma: float,
 
 def adjust(sims: np.ndarray, last_close: float, sigma: float, *, anchor: bool = True,
            rescale: bool = True, drift_keep: float = 0.5) -> np.ndarray:
-    out = sims
+    # Drop broken paths (NaN or non-positive prices) so one bad path cannot turn the whole fan into NaN
+    ok = np.isfinite(sims).all(axis=1) & (sims > 0).all(axis=1)
+    out = sims[ok] if ok.sum() >= 3 else sims
     if anchor:
         out = anchor_first_bar(out, last_close, sigma)
     if rescale:
