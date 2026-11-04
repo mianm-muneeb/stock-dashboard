@@ -255,9 +255,11 @@ def forecast_tab():
 
     # Earnings gate: the model cannot see events, so forecasts across one are not meaningful
     blocked = False
+    earn_date = None
     if not holdout and interval == "1d":
         edate = load_earnings(ticker)
         if edate is not None and hist.index[-1] < edate <= future[-1]:
+            earn_date = edate
             st.warning(
                 f"{ticker} reports earnings on {edate.date()}, inside this forecast window. "
                 "Kronos cannot see events, so treat the fan as noise."
@@ -294,6 +296,17 @@ def forecast_tab():
     # Risk box: what the data supports (range + stop + size), not a direction call
     with st.container(border=True):
         st.markdown("**Risk box** (the backtests support the range, not the direction)")
+        _up = float(p75[-1]) - last_close
+        _dn = last_close - float(p05[len(p05) // 2])
+        _rr = _up / _dn if _dn > 0 else 0.0
+        if earn_date is not None:
+            st.error(f"WAIT: earnings on {earn_date.date()} can move this stock more than anything on the chart. "
+                     f"Run it again after the report.")
+        elif _rr >= 2:
+            st.success(f"OK: upside to the likely zone is {_rr:.1f}x the downside to the stop. Worth a small, stop-protected trade.")
+        else:
+            st.warning(f"PASS: upside to the likely zone is only {_rr:.1f}x the downside to the stop (need 2x or more). "
+                       f"It's a coin flip, so skip it or wait for a better setup.")
         rc1, rc2 = st.columns(2)
         risk_usd = rc1.number_input("Most you accept to lose on this trade ($)", 10.0, 100000.0, 50.0, 10.0, key="kr_risk")
         stop = float(p05[len(p05) // 2])
