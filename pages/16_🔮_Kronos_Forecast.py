@@ -100,7 +100,7 @@ with st.sidebar:
     if ON_CLOUD:
         st.caption("These settings drive the Live forecast tab. Cloud CPU is shared and throttled, so use Kronos-small here. "
                    "Ensemble and Kronos-base results are precomputed nightly in the Full model (saved) tab.")
-    horizon = st.slider("Forecast horizon (bars)", 5, 252, 126, help="126 daily bars is about 6 months.")
+    horizon = st.slider("Forecast horizon (bars)", 5, 252, 63, help="63 daily bars is about 3 months. 126 is about 6 months.")
     lookback = st.slider("Lookback (bars)", 100, 512, 400)
     paths = st.slider("Simulated paths per model", 10, 80, 20, help="Ensemble on CPU takes a few minutes; Kronos-base is the slow one.")
     temp = st.slider("Temperature", 0.5, 1.5, 1.0, 0.05)
