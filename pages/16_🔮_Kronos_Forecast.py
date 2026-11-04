@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
+import streamlit.components.v1 as components
 
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
@@ -86,7 +87,7 @@ st.caption(
 )
 
 with st.form("kr_form", border=False):
-    _c1, _c2 = st.columns([3, 1])
+    _c1, _c2 = st.columns([4, 1], vertical_alignment="bottom")
     ticker = _c1.text_input("Ticker (ASX: BHP.AX)", "", placeholder="e.g. VST").strip().upper()
     go_btn = _c2.form_submit_button("Run forecast", type="primary", use_container_width=True)
 
@@ -99,7 +100,7 @@ with st.sidebar:
     if ON_CLOUD:
         st.caption("These settings drive the Live forecast tab. Cloud CPU is shared and throttled, so use Kronos-small here. "
                    "Ensemble and Kronos-base results are precomputed nightly in the Full model (saved) tab.")
-    horizon = st.slider("Forecast horizon (bars)", 5, 60, 20)
+    horizon = st.slider("Forecast horizon (bars)", 5, 252, 126, help="126 daily bars is about 6 months.")
     lookback = st.slider("Lookback (bars)", 100, 512, 400)
     paths = st.slider("Simulated paths per model", 10, 80, 20, help="Ensemble on CPU takes a few minutes; Kronos-base is the slow one.")
     temp = st.slider("Temperature", 0.5, 1.5, 1.0, 0.05)
@@ -125,6 +126,97 @@ def models_for(mode_label: str):
     if mode_label.startswith("Ensemble"):
         return ["small", "base"]
     return ["small"] if mode_label.endswith("small") else ["base"]
+
+
+def _animated_fan(ticker, hist, future, sims, raw, p05, p25, p50, p75, p95, last_close, show_raw, actual):
+    """Animated, auto-playing fan chart (plotly.js frames in an iframe)."""
+    tail = hist.iloc[-min(260, len(hist)):]
+    x0 = hist.index[-1]
+    fx = [x0] + list(future)
+    pre = lambda a: np.concatenate([[last_close], np.asarray(a, dtype=float)])
+    P05, P25, P50, P75, P95 = (pre(a) for a in (p05, p25, p50, p75, p95))
+    n_paths = min(len(sims), 30)
+    paths = [pre(sims[i]) for i in range(n_paths)]
+    H = len(future)
+    steps = min(H, 60)
+    idxs = sorted(set(int(v) for v in np.linspace(1, H, steps)))
+
+    CY, MG = "0,229,255", "255,64,200"
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=tail.index, y=tail["close"], name="History", mode="lines",
+                             line=dict(color="rgba(255,255,255,.55)", width=5), hoverinfo="skip", showlegend=False))
+    fig.add_trace(go.Scatter(x=tail.index, y=tail["close"], name="History", mode="lines",
+                             line=dict(color="#f2f6ff", width=2), hovertemplate="%{x|%d %b %Y}: %{y:,.2f}<extra></extra>"))
+    first_path = len(fig.data)
+    for p in paths:
+        fig.add_trace(go.Scatter(x=[x0], y=[last_close], mode="lines", line=dict(color=f"rgba({CY},.16)", width=1),
+                                 hoverinfo="skip", showlegend=False))
+    i95 = len(fig.data)
+    fig.add_trace(go.Scatter(x=[x0], y=[last_close], fill="toself", fillcolor=f"rgba({CY},.10)",
+                             line=dict(color=f"rgba({CY},.35)", width=1, dash="dot"), name="5-95%", hoverinfo="skip"))
+    i75 = len(fig.data)
+    fig.add_trace(go.Scatter(x=[x0], y=[last_close], fill="toself", fillcolor=f"rgba({CY},.22)",
+                             line=dict(width=0), name="25-75%", hoverinfo="skip"))
+    iglow = len(fig.data)
+    fig.add_trace(go.Scatter(x=[x0], y=[last_close], mode="lines", line=dict(color=f"rgba({CY},.28)", width=12),
+                             hoverinfo="skip", showlegend=False))
+    imed = len(fig.data)
+    fig.add_trace(go.Scatter(x=[x0], y=[last_close], mode="lines", name="Median path", line=dict(color=f"rgb({CY})", width=3),
+                             hovertemplate="%{x|%d %b %Y}: %{y:,.2f}<extra>median</extra>"))
+    ihg = len(fig.data)
+    fig.add_trace(go.Scatter(x=[x0], y=[last_close], mode="markers", marker=dict(size=26, color=f"rgba({MG},.25)"),
+                             hoverinfo="skip", showlegend=False))
+    ihd = len(fig.data)
+    fig.add_trace(go.Scatter(x=[x0], y=[last_close], mode="markers+text", text=[""], textposition="middle right",
+                             textfont=dict(color="#ffffff", size=15), marker=dict(size=10, color=f"rgb({MG})",
+                             line=dict(color="#fff", width=1.5)), hoverinfo="skip", showlegend=False))
+    if actual is not None:
+        fig.add_trace(go.Scatter(x=actual.index, y=actual["close"], name="Actual", line=dict(color="#ffb020", width=3)))
+    if show_raw:
+        r05, r95 = np.percentile(raw, [5, 95], axis=0)
+        fig.add_trace(go.Scatter(x=list(future) + list(future[::-1]), y=list(r95) + list(r05[::-1]), fill="toself",
+                                 fillcolor="rgba(255,176,32,.06)", line=dict(color="rgba(255,176,32,.5)", dash="dot", width=1),
+                                 name="Raw model 5-95%"))
+
+    traces = [first_path + i for i in range(n_paths)] + [i95, i75, iglow, imed, ihg, ihd]
+    frames = []
+    for k in idxs:
+        xs = fx[:k + 1]
+        data = [go.Scatter(x=xs, y=p[:k + 1]) for p in paths]
+        data.append(go.Scatter(x=xs + xs[::-1], y=list(P95[:k + 1]) + list(P05[:k + 1][::-1])))
+        data.append(go.Scatter(x=xs + xs[::-1], y=list(P75[:k + 1]) + list(P25[:k + 1][::-1])))
+        data.append(go.Scatter(x=xs, y=P50[:k + 1]))
+        data.append(go.Scatter(x=xs, y=P50[:k + 1]))
+        data.append(go.Scatter(x=[xs[-1]], y=[P50[k]]))
+        chg = (P50[k] / last_close - 1) * 100
+        data.append(go.Scatter(x=[xs[-1]], y=[P50[k]], text=[f"  {P50[k]:,.2f}  ({chg:+.1f}%)"]))
+        frames.append(go.Frame(data=data, traces=traces, name=str(k)))
+    fig.frames = frames
+
+    ylo = float(min(tail["close"].min(), P05.min())); yhi = float(max(tail["close"].max(), P95.max()))
+    pad = (yhi - ylo) * 0.06
+    span = (future[-1] - tail.index[0])
+    fig.update_layout(
+        height=700, margin=dict(l=10, r=10, t=50, b=10),
+        paper_bgcolor="#07090f", plot_bgcolor="#07090f", font=dict(color="#9fb3c8"),
+        title=dict(text=f"<b>{ticker}</b>  ·  Kronos projection  ·  next {H} bars", x=0.01, font=dict(size=20, color="#e8f4ff")),
+        xaxis=dict(range=[tail.index[0], future[-1] + span * 0.12], showgrid=True, gridcolor="rgba(0,229,255,.06)",
+                   zeroline=False, showspikes=True, spikecolor="rgba(0,229,255,.4)", spikethickness=1),
+        yaxis=dict(range=[ylo - pad, yhi + pad], showgrid=True, gridcolor="rgba(0,229,255,.06)", zeroline=False,
+                   side="right", tickformat=",.0f"),
+        legend=dict(orientation="h", y=1.04, x=1, xanchor="right", bgcolor="rgba(0,0,0,0)"),
+        hovermode="x unified",
+        shapes=[dict(type="line", x0=x0, x1=x0, y0=0, y1=1, yref="paper", line=dict(color="rgba(255,255,255,.25)", width=1, dash="dash"))],
+        annotations=[dict(x=x0, y=1, yref="paper", text="NOW", showarrow=False, xanchor="right", font=dict(size=11, color="#7e93a8"))],
+        updatemenus=[dict(type="buttons", showactive=False, x=0.01, y=0.99, xanchor="left", yanchor="top",
+                          bgcolor="#0f1722", bordercolor="rgba(0,229,255,.5)", font=dict(color="#00e5ff"),
+                          buttons=[dict(label="⟲ Replay", method="animate",
+                                        args=[None, dict(frame=dict(duration=20, redraw=True), fromcurrent=False,
+                                                         transition=dict(duration=0), mode="immediate")])])],
+    )
+    html = fig.to_html(include_plotlyjs="cdn", full_html=False, auto_play=True, config={"displayModeBar": False},
+                       default_height="700px")
+    components.html(f'<div style="background:#07090f">{html}</div>', height=715)
 
 
 # ---------------------------------------------------------------------------
@@ -181,27 +273,9 @@ def forecast_tab():
     p05, p25, p50, p75, p95 = np.percentile(sims, [5, 25, 50, 75, 95], axis=0)
     prob_up = float((sims[:, -1] > last_close).mean())
 
-    fig = go.Figure()
-    tail = hist.iloc[-min(120, len(hist)):]
-    fig.add_trace(go.Scatter(x=tail.index, y=tail["close"], name="History", line=dict(color="#e6e6e6", width=2)))
-    for i in range(min(len(sims), 25)):
-        fig.add_trace(go.Scatter(x=future, y=sims[i], mode="lines", line=dict(color="rgba(63,163,245,.15)", width=1),
-                                 showlegend=False, hoverinfo="skip"))
-    if show_raw:
-        r05, r95 = np.percentile(raw, [5, 95], axis=0)
-        fig.add_trace(go.Scatter(x=list(future) + list(future[::-1]), y=list(r95) + list(r05[::-1]), fill="toself",
-                                 fillcolor="rgba(255,176,32,.08)", line=dict(color="rgba(255,176,32,.5)", dash="dot", width=1),
-                                 name="Raw model 5-95%"))
-    fig.add_trace(go.Scatter(x=list(future) + list(future[::-1]), y=list(p95) + list(p05[::-1]), fill="toself",
-                             fillcolor="rgba(63,163,245,.12)", line=dict(width=0), name="5-95%"))
-    fig.add_trace(go.Scatter(x=list(future) + list(future[::-1]), y=list(p75) + list(p25[::-1]), fill="toself",
-                             fillcolor="rgba(63,163,245,.25)", line=dict(width=0), name="25-75%"))
-    fig.add_trace(go.Scatter(x=future, y=p50, name="Median path", line=dict(color=BLUE, width=3)))
-    if actual is not None:
-        fig.add_trace(go.Scatter(x=actual.index, y=actual["close"], name="Actual", line=dict(color="#ffb020", width=3)))
-    apply_dark_plotly(fig)
-    fig.update_layout(height=540, margin=dict(l=10, r=10, t=30, b=10), legend=dict(orientation="h"), yaxis_title="Close")
-    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+    _animated_fan(ticker, hist, future, sims, raw, p05, p25, p50, p75, p95, last_close, show_raw, actual)
+    if len(future) > 60:
+        st.caption("Past about 60 bars the fan is mostly volatility, not signal. Read it as a range of outcomes.")
 
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Last close", f"{last_close:,.2f}")
