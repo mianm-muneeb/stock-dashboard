@@ -1,0 +1,66 @@
+[
+ {
+  "H": 21,
+  "earnings_in_window": false,
+  "model": "overlay",
+  "windows": 1848,
+  "coverage": 91.1,
+  "width": 38.1
+ },
+ {
+  "H": 21,
+  "earnings_in_window": false,
+  "model": "plain",
+  "windows": 1848,
+  "coverage": 91.1,
+  "width": 38.1
+ },
+ {
+  "H": 21,
+  "earnings_in_window": true,
+  "model": "overlay",
+  "windows": 815,
+  "coverage": 87.5,
+  "width": 47.3
+ },
+ {
+  "H": 21,
+  "earnings_in_window": true,
+  "model": "plain",
+  "windows": 815,
+  "coverage": 78.9,
+  "width": 37.7
+ },
+ {
+  "H": 63,
+  "earnings_in_window": false,
+  "model": "overlay",
+  "windows": 139,
+  "coverage": 86.3,
+  "width": 62.7
+ },
+ {
+  "H": 63,
+  "earnings_in_window": false,
+  "model": "plain",
+  "windows": 139,
+  "coverage": 86.3,
+  "width": 62.7
+ },
+ {
+  "H": 63,
+  "earnings_in_window": true,
+  "model": "overlay",
+  "windows": 2374,
+  "coverage": 89.7,
+  "width": 71.4
+ },
+ {
+  "H": 63,
+  "earnings_in_window": true,
+  "model": "plain",
+  "windows": 2374,
+  "coverage": 85.8,
+  "width": 65.0
+ }
+]

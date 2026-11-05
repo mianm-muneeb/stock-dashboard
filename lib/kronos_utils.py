@@ -6,6 +6,7 @@ relative to the last close.
 """
 from __future__ import annotations
 
+import time
 from typing import Callable
 
 import numpy as np
@@ -41,6 +42,118 @@ def next_earnings_date(ticker: str):
         return ts.tz_localize(None) if ts.tzinfo is not None else ts
     except Exception:
         return None
+
+
+def earnings_info(ticker: str, bars: pd.DataFrame, limit: int = 24) -> dict:
+    """Past earnings reactions and the next report, from yfinance. Never raises.
+
+    Returns {"hist": DataFrame[date, timing, move], "next": Timestamp|None, "next_timing": str}.
+    move = log return on the reaction bar (same day for a pre-market report, next day for
+    after-close). If the report time is unknown, the larger of the two days is used.
+    """
+    out = {"hist": pd.DataFrame(columns=["date", "timing", "move"]), "next": None, "next_timing": "bmo"}
+    ed = None
+    for attempt in range(3):  # Yahoo sometimes rate-limits or returns nothing on the first call
+        try:
+            ed = yf.Ticker(ticker).get_earnings_dates(limit=limit)
+        except Exception:
+            ed = None
+        if ed is not None and len(ed):
+            break
+        time.sleep(1.5)
+    if ed is None or len(ed) == 0:
+        out["next"] = next_earnings_date(ticker)
+        return out
+
+    close = bars["close"].astype(float)
+    lr = np.log(close).diff()
+    idx = close.index
+    rows, nxt, nxt_hour = [], None, None
+    now = pd.Timestamp.now().normalize()
+    for ts, r in ed.iterrows():
+        t = pd.Timestamp(ts)
+        t = t.tz_localize(None) if t.tzinfo is not None else t  # keep exchange-local clock time
+        reported = pd.notna(r.get("Reported EPS"))
+        day = t.normalize()
+        if not reported and day >= now:
+            if nxt is None or day < nxt:
+                nxt, nxt_hour = day, t.hour
+            continue
+        if not reported:
+            continue
+        pos = int(idx.searchsorted(day))
+        if pos < 1 or pos + 1 >= len(idx):
+            continue
+        if t.hour >= 16:
+            timing, mv = "amc", lr.iloc[pos + 1]
+        elif 1 <= t.hour < 16:
+            timing, mv = "bmo", lr.iloc[pos]
+        else:
+            a, b = lr.iloc[pos], lr.iloc[pos + 1]
+            timing, mv = "unk", (a if abs(a) >= abs(b) else b)
+        if np.isfinite(mv):
+            rows.append({"date": day, "timing": timing, "move": float(mv)})
+    hist = pd.DataFrame(rows, columns=["date", "timing", "move"]).sort_values("date").reset_index(drop=True)
+    out["hist"] = hist
+    out["next"] = nxt if nxt is not None else next_earnings_date(ticker)
+    if nxt is not None and nxt_hour is not None and nxt_hour >= 1:
+        out["next_timing"] = "amc" if nxt_hour >= 16 else "bmo"
+    elif len(hist):
+        known = hist[hist["timing"] != "unk"]["timing"]
+        if len(known):
+            out["next_timing"] = known.mode().iloc[0]
+    return out
+
+
+def _reaction_pos(future: pd.DatetimeIndex, day: pd.Timestamp, timing: str):
+    """Index in `future` of the bar that carries the earnings reaction, or None."""
+    pos = int(future.searchsorted(pd.Timestamp(day).normalize()))
+    if timing == "amc":
+        pos += 1
+    return pos if pos < len(future) else None
+
+
+def earnings_jumps(moves, sigma: float, n: int, rng: np.random.Generator, min_n: int = 4):
+    """Draw n earnings-day log jumps from a stock's own past reactions.
+
+    Zero-centred (so we impose size, not direction), with the variance an ordinary day
+    already contributes removed. Fewer than min_n past reactions -> fall back to 3 sigma.
+    """
+    m = np.asarray([x for x in moves if np.isfinite(x)], dtype=float)
+    if len(m) >= min_n:
+        c = m - m.mean()
+        s_tot = float(m.std(ddof=1)) if len(m) > 1 else float(abs(c).mean())
+        s = np.sqrt(max(s_tot ** 2 - sigma ** 2, (0.25 * s_tot) ** 2))
+        c = c / max(c.std(ddof=1), 1e-9) * s
+        draw = rng.choice(c, size=n, replace=True) + rng.normal(0.0, 0.15 * s, size=n)
+        return draw, {"n": int(len(m)), "fallback": False, "typical": float(np.mean(np.abs(m)))}
+    s = float(np.sqrt(max(8.0 * sigma ** 2, 1e-12)))  # total move ~3 sigma, minus one ordinary day
+    return rng.normal(0.0, s, size=n), {"n": int(len(m)), "fallback": True, "typical": float(2.4 * sigma)}
+
+
+def apply_earnings_jumps(sims: np.ndarray, future: pd.DatetimeIndex, reports, moves, sigma: float,
+                         seed: int = 7):
+    """Add an earnings jump on each report date inside the forecast window.
+
+    reports: list of (date, timing). Returns (sims, info) where info has n, fallback,
+    typical (mean |move|), p10 (adverse 10% jump) and marks (bar dates). sims unchanged
+    (info None) if no report lands inside the window.
+    """
+    rng = np.random.default_rng(seed)
+    out = sims.copy()
+    info, marks, p10s = None, [], []
+    for day, timing in reports:
+        pos = _reaction_pos(future, day, timing)
+        if pos is None:
+            continue
+        j, info = earnings_jumps(moves, sigma, len(out), rng)
+        out[:, pos:] = out[:, pos:] * np.exp(j)[:, None]
+        marks.append(future[pos])
+        p10s.append(float(np.percentile(j, 10)))
+    if info is None:
+        return sims, None
+    info = dict(info, marks=marks, p10=float(min(p10s)))
+    return out, info
 
 
 def future_index(last: pd.Timestamp, n: int, interval: str) -> pd.DatetimeIndex:

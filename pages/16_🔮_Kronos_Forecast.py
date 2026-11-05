@@ -52,6 +52,12 @@ def load_earnings(ticker: str):
     return ku.next_earnings_date(ticker)
 
 
+@st.cache_data(ttl=3600, show_spinner=False)
+def load_earn_info(ticker: str):
+    # Uses full daily history so past earnings reactions are measured on real bars
+    return ku.earnings_info(ticker, ku.fetch_bars(ticker, "1d"))
+
+
 # Full-model results are computed on GitHub Actions (free 4-core runners) and published to the
 # kronos-data branch; this page only reads them, so the app never runs the heavy models.
 SAVED_BASE = "https://raw.githubusercontent.com/muneeb7777/stock-dashboard/kronos-data/data/kronos"
@@ -112,9 +118,11 @@ with st.sidebar:
                            help="0 = random walk from last close, 1 = trust the model fully. Use the Calibration tab to choose.")
     show_raw = st.checkbox("Show raw model band", value=False)
     holdout = st.checkbox("Reality check: hide the last N bars and compare", value=False)
+    use_earn = st.checkbox("Add earnings jump (from this stock's past reports)", value=True,
+                           help="Kronos cannot see events. This adds a jump on each report date, sampled from the stock's own past earnings-day moves. It widens the range; it does not predict direction.")
 
 PARAM_KEYS = ["ticker", "interval", "mode", "horizon", "lookback", "paths", "temp", "top_p",
-              "use_anchor", "use_rescale", "drift_keep", "show_raw", "holdout"]
+              "use_anchor", "use_rescale", "drift_keep", "show_raw", "holdout", "use_earn"]
 if go_btn and ticker:
     # A button is only True for one rerun; keep the settings so other widgets
     # (like "Show it anyway") don't wipe the forecast.
@@ -128,7 +136,8 @@ def models_for(mode_label: str):
     return ["small"] if mode_label.endswith("small") else ["base"]
 
 
-def _animated_fan(ticker, hist, future, sims, raw, p05, p25, p50, p75, p95, last_close, show_raw, actual):
+def _animated_fan(ticker, hist, future, sims, raw, p05, p25, p50, p75, p95, last_close, show_raw, actual,
+                  earn_marks=None):
     """Animated, auto-playing fan chart (plotly.js frames in an iframe)."""
     tail = hist.iloc[-min(260, len(hist)):]
     x0 = hist.index[-1]
@@ -206,12 +215,16 @@ def _animated_fan(ticker, hist, future, sims, raw, p05, p25, p50, p75, p95, last
                    side="right", tickformat=",.0f", automargin=True, tickfont=dict(size=13)),
         legend=dict(orientation="h", y=1.04, x=1, xanchor="right", bgcolor="rgba(0,0,0,0)"),
         hovermode="x unified",
-        shapes=[dict(type="line", x0=x0, x1=x0, y0=0, y1=1, yref="paper", line=dict(color="rgba(255,255,255,.25)", width=1, dash="dash"))],
+        shapes=[dict(type="line", x0=x0, x1=x0, y0=0, y1=1, yref="paper", line=dict(color="rgba(255,255,255,.25)", width=1, dash="dash"))]
+        + [dict(type="line", x0=m, x1=m, y0=0, y1=1, yref="paper", line=dict(color="rgba(255,176,32,.6)", width=1, dash="dot"))
+           for m in (earn_marks or [])],
         annotations=[dict(x=x0, y=1, yref="paper", text="NOW", showarrow=False, xanchor="right", font=dict(size=11, color="#7e93a8"))]
         + [dict(x=future[-1], y=float(v), text=f"<b>{lab}</b>  {v:,.0f}  ({(v / last_close - 1) * 100:+.0f}%)", showarrow=False,
                 xanchor="left", xshift=10, font=dict(size=12, color=col))
            for lab, v, col in (("Best case (top 5%)", P95[-1], "#6fe3a0"), ("Upper likely", P75[-1], "#8fd9ff"),
                                ("Lower likely", P25[-1], "#8fd9ff"), ("Worst case (bottom 5%)", P05[-1], "#ff8a8a"))]
+        + [dict(x=m, y=0.02, yref="paper", text="Earnings", showarrow=False, xanchor="left", xshift=4,
+                font=dict(size=11, color="#ffb020")) for m in (earn_marks or [])]
         + [dict(x=tail.index[len(tail) // 2], y=1.0, yref="paper", text="PAST (real prices)", showarrow=False,
                 font=dict(size=12, color="#7e93a8"))]
         + [dict(x=future[len(future) // 2], y=1.0, yref="paper", text="FUTURE (simulated, not a prediction)", showarrow=False,
@@ -236,7 +249,8 @@ def forecast_tab():
         st.info("Pick a ticker (ASX: BHP.AX) and hit **Run forecast**.")
         return
     (ticker, interval, mode, horizon, lookback, paths, temp, top_p,
-     use_anchor, use_rescale, drift_keep, show_raw, holdout) = (P[k] for k in PARAM_KEYS)
+     use_anchor, use_rescale, drift_keep, show_raw, holdout) = (P[k] for k in PARAM_KEYS[:13])
+    use_earn = P.get("use_earn", True)
 
     bars = load_bars(ticker, interval)
     if bars.empty or len(bars) < lookback + (horizon if holdout else 0) + 10:
@@ -253,15 +267,32 @@ def forecast_tab():
     last_close = float(hist["close"].iloc[-1])
     sigma = ku.daily_sigma(hist["close"])
 
-    # Earnings gate: the model cannot see events, so forecasts across one are not meaningful
+    # Earnings: the model cannot see events. With the overlay on, the fan gets a jump on each report
+    # date (sampled from the stock's own past reactions). With it off, the old gate applies.
     blocked = False
     earn_date = None
-    if not holdout and interval == "1d":
-        edate = load_earnings(ticker)
-        if edate is not None and hist.index[-1] < edate <= future[-1]:
-            earn_date = edate
+    reports, moves = [], []
+    if interval == "1d":
+        einfo = load_earn_info(ticker)
+        if len(einfo["hist"]) == 0:  # don't let a failed Yahoo lookup stay cached for an hour
+            load_earn_info.clear()
+            einfo = load_earn_info(ticker)
+        hh = einfo["hist"]
+        end = future[-1]
+        if holdout:
+            # Reality check: past reports inside the hidden window, learned only from reports before it
+            win = hh[(hh["date"] > hist.index[-1]) & (hh["date"] <= end)]
+            reports = [(r.date, r.timing) for r in win.itertuples()]
+            moves = hh[hh["date"] <= hist.index[-1]]["move"].tolist()
+        else:
+            edate = einfo["next"]
+            if edate is not None and hist.index[-1] < edate <= end:
+                earn_date = edate
+                reports = [(edate, einfo["next_timing"])]
+            moves = hh["move"].tolist()
+        if earn_date is not None and not use_earn:
             st.warning(
-                f"{ticker} reports earnings on {edate.date()}, inside this forecast window. "
+                f"{ticker} reports earnings on {earn_date.date()}, inside this forecast window. "
                 "Kronos cannot see events, so treat the fan as noise."
             )
             blocked = not st.checkbox("Show it anyway", value=False, key="kr_anyway")
@@ -278,12 +309,24 @@ def forecast_tab():
     raw = np.concatenate(list(results.values()), axis=0)
     adj_parts = [ku.adjust(s, last_close, sigma, anchor=use_anchor, rescale=use_rescale, drift_keep=drift_keep)
                  for s in results.values()]
+    ejump = None
+    if use_earn and reports:
+        pairs = [ku.apply_earnings_jumps(a, future, reports, moves, sigma) for a in adj_parts]
+        adj_parts = [a for a, _ in pairs]
+        ejump = next((i for _, i in pairs if i is not None), None)
     sims = np.concatenate(adj_parts, axis=0)
+    if ejump is not None:
+        _d = ", ".join(pd.Timestamp(m).strftime("%d %b") for m in ejump["marks"])
+        _src = (f"fallback of about 3x a normal day (only {ejump['n']} past reports found)" if ejump["fallback"]
+                else f"sampled from its last {ejump['n']} reports, typical move about ±{ejump['typical'] * 100:.1f}%")
+        st.info(f"{ticker} reports earnings on {_d}, inside this window. The fan includes an earnings jump, {_src}. "
+                "Direction is still a coin flip; this makes the range honest.")
 
     p05, p25, p50, p75, p95 = np.percentile(sims, [5, 25, 50, 75, 95], axis=0)
     prob_up = float((sims[:, -1] > last_close).mean())
 
-    _animated_fan(ticker, hist, future, sims, raw, p05, p25, p50, p75, p95, last_close, show_raw, actual)
+    _animated_fan(ticker, hist, future, sims, raw, p05, p25, p50, p75, p95, last_close, show_raw, actual,
+                  earn_marks=(ejump["marks"] if ejump else None))
     if len(future) > 60:
         st.caption("Past about 60 bars the fan is mostly volatility, not signal. Read it as a range of outcomes.")
 
@@ -299,7 +342,10 @@ def forecast_tab():
         _up = float(p75[-1]) - last_close
         _dn = last_close - float(p05[len(p05) // 2])
         _rr = _up / _dn if _dn > 0 else 0.0
-        if earn_date is not None:
+        if earn_date is not None and ejump is not None:
+            st.warning(f"Earnings on {earn_date.date()} are inside the window and priced into this range. A stop can gap "
+                       f"through on the report, so the share count below is sized for the gap.")
+        if earn_date is not None and ejump is None:
             st.error(f"WAIT: earnings on {earn_date.date()} can move this stock more than anything on the chart. "
                      f"Run it again after the report.")
         elif _rr >= 2:
@@ -311,6 +357,8 @@ def forecast_tab():
         risk_usd = rc1.number_input("Most you accept to lose on this trade ($)", 10.0, 100000.0, 50.0, 10.0, key="kr_risk")
         stop = float(p05[len(p05) // 2])
         per_share = max(last_close - stop, 1e-9)
+        if ejump is not None:
+            per_share = max(per_share, last_close * (1 - float(np.exp(ejump["p10"]))))  # adverse earnings gap
         shares = int(risk_usd // per_share)
         rc2.metric("Stop level (5% line, mid-forecast)", f"{stop:,.2f}", f"{(stop / last_close - 1) * 100:+.1f}%")
         st.write(
