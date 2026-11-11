@@ -1,15 +1,15 @@
 {
- "generated_at": "2026-11-10T04:26:58+00:00",
+ "generated_at": "2026-11-11T02:15:19+00:00",
  "forecasts": [
   {
    "ticker": "NFLX",
    "file": "NFLX.json",
-   "generated_at": "2026-11-10T04:26:47+00:00",
-   "last_date": "2026-11-09",
-   "last_close": 63.95,
+   "generated_at": "2026-11-11T02:15:08+00:00",
+   "last_date": "2026-11-10",
+   "last_close": 63.26,
    "horizon": 20,
-   "ensemble_median_end_pct": 13.14,
-   "ensemble_prob_up": 0.863,
+   "ensemble_median_end_pct": 11.57,
+   "ensemble_prob_up": 0.887,
    "agree": false,
    "earnings_date": "2027-01-19",
    "earnings_in_window": false
@@ -17,12 +17,12 @@
   {
    "ticker": "NVDA",
    "file": "NVDA.json",
-   "generated_at": "2026-11-10T04:26:26+00:00",
-   "last_date": "2026-11-09",
-   "last_close": 178.67,
+   "generated_at": "2026-11-11T02:14:41+00:00",
+   "last_date": "2026-11-10",
+   "last_close": 168.89,
    "horizon": 20,
-   "ensemble_median_end_pct": 2.99,
-   "ensemble_prob_up": 0.625,
+   "ensemble_median_end_pct": 5.69,
+   "ensemble_prob_up": 0.75,
    "agree": false,
    "earnings_date": "2026-11-17",
    "earnings_in_window": true
@@ -30,12 +30,12 @@
   {
    "ticker": "ORCL",
    "file": "ORCL.json",
-   "generated_at": "2026-11-10T04:26:42+00:00",
-   "last_date": "2026-11-09",
-   "last_close": 119.79,
+   "generated_at": "2026-11-11T02:14:31+00:00",
+   "last_date": "2026-11-10",
+   "last_close": 117.98,
    "horizon": 20,
-   "ensemble_median_end_pct": 9.64,
-   "ensemble_prob_up": 0.675,
+   "ensemble_median_end_pct": 12.27,
+   "ensemble_prob_up": 0.7,
    "agree": false,
    "earnings_date": "2026-12-14",
    "earnings_in_window": false
@@ -43,12 +43,12 @@
   {
    "ticker": "VST",
    "file": "VST.json",
-   "generated_at": "2026-11-10T04:25:29+00:00",
+   "generated_at": "2026-11-11T02:11:17+00:00",
    "last_date": "2026-11-09",
    "last_close": 133.92,
    "horizon": 20,
-   "ensemble_median_end_pct": 6.06,
-   "ensemble_prob_up": 0.6,
+   "ensemble_median_end_pct": 9.41,
+   "ensemble_prob_up": 0.7,
    "agree": true,
    "earnings_date": "2026-11-06",
    "earnings_in_window": false
